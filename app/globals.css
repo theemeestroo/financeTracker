@@ -18,6 +18,7 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-content-panel: var(--content-panel);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -49,72 +50,104 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  /* Page canvas — the outer grey behind the floating sidebar/content panels. */
+  --background: #e8e8ed;
+  --foreground: #0c0d0d;
+  /* White surface: sidebar card, Stripe-style metric/section cards, table rows. */
+  --card: #ffffff;
+  --card-foreground: #0c0d0d;
+  --popover: #ffffff;
+  --popover-foreground: #0c0d0d;
+  /* Ink — primary buttons, active nav pill, dark chart bars/fills. */
+  --primary: #0c0d0d;
+  --primary-foreground: #fafafa;
+  /* Off-white — nav tile backgrounds, secondary surfaces. */
+  --secondary: #fafafa;
+  --secondary-foreground: #0c0d0d;
+  --muted: #f0f0f2;
+  --muted-foreground: #6b6b70;
+  --accent: #fafafa;
+  --accent-foreground: #0c0d0d;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.5rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --border: #e2e2e7;
+  --input: #e2e2e7;
+  --ring: #b8b8be;
+  /* Single-series monochrome ramp (category breakdown bars, depletion line) — light to ink. */
+  --chart-1: #e4e4e9;
+  --chart-2: #b3b3ba;
+  --chart-3: #7a7a82;
+  --chart-4: #45454b;
+  --chart-5: #0c0d0d;
+  --radius: 1rem;
+  /* Repurposed as the floating sidebar card's surface (white). */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0c0d0d;
+  --sidebar-primary: #0c0d0d;
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: #fafafa;
+  --sidebar-accent-foreground: #0c0d0d;
+  --sidebar-border: #e2e2e7;
+  --sidebar-ring: #b8b8be;
+  /* Content panel tint — the main scrollable area's floating card. */
+  --content-panel: #ecf4ee;
+  /* Status colors for semantic data (surplus/deficit) — reserved, never used
+     for categorical series. Values from the dataviz skill's validated palette. */
+  --status-good: #006300;
+  --status-critical: #d03b3b;
+  /* Amber tri-state accent — reserved for genuine "ending soon" data (a
+     commitment/income row whose end_date falls within the next 60 days).
+     Never used as chrome or repurposed as a 5th categorical hue. */
+  --status-warning: #a15c00;
+  /* Categorical series colors — for telling distinct entities apart (e.g.
+     scenarios in a comparison chart). Never reused for single-series charts,
+     which stay on the monochrome --chart-* tokens above. First 4 slots of
+     the dataviz skill's validated 8-hue categorical theme. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: #101112;
+  --foreground: #fafafa;
+  --card: #1c1c1f;
+  --card-foreground: #fafafa;
+  --popover: #1c1c1f;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #0c0d0d;
+  --secondary: #232326;
+  --secondary-foreground: #fafafa;
+  --muted: #212124;
+  --muted-foreground: #9a9aa0;
+  --accent: #232326;
+  --accent-foreground: #fafafa;
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.985 0 0);
-  --sidebar-primary-foreground: oklch(0.205 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --ring: #6b6b70;
+  --chart-1: #3a3a3f;
+  --chart-2: #55555c;
+  --chart-3: #83838a;
+  --chart-4: #b3b3ba;
+  --chart-5: #fafafa;
+  --sidebar: #1c1c1f;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #fafafa;
+  --sidebar-primary-foreground: #0c0d0d;
+  --sidebar-accent: #232326;
+  --sidebar-accent-foreground: #fafafa;
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: #6b6b70;
+  --content-panel: #161c19;
+  --status-good: #0ca30c;
+  --status-critical: #d03b3b;
+  --status-warning: #e0a640;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
 }
 
 @layer base {

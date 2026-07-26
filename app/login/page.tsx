@@ -11,10 +11,16 @@ export default function LoginPage() {
   const [state, action, pending] = useActionState(login, undefined);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-lg">Financial Runway Tracker</CardTitle>
+          <div className="mb-2 flex items-center gap-2.5">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-sm font-bold text-primary-foreground">
+              FR
+            </span>
+            <span className="text-base font-semibold tracking-tight">Runway</span>
+          </div>
+          <CardTitle className="text-xl font-bold tracking-tight">Sign in</CardTitle>
         </CardHeader>
         <CardContent>
           <form action={action} className="flex flex-col gap-4">

@@ -16,7 +16,7 @@ export default async function EditIncomePage({
     supabase
       .from("income")
       .select(
-        "id, profile_id, household_member_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id"
+        "id, profile_id, household_member_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost"
       )
       .eq("id", id)
       .single(),
@@ -28,7 +28,7 @@ export default async function EditIncomePage({
   return (
     <div className="flex max-w-lg flex-col gap-6">
       <div>
-        <h1 className="text-lg font-semibold tracking-tight">Edit income</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Edit income</h1>
       </div>
       <IncomeForm
         action={updateIncome.bind(null, id)}

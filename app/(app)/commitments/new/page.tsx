@@ -13,7 +13,7 @@ export default async function NewCommitmentPage() {
   return (
     <div className="flex max-w-lg flex-col gap-6">
       <div>
-        <h1 className="text-lg font-semibold tracking-tight">Add commitment</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Add commitment</h1>
       </div>
       <CommitmentForm
         action={createCommitment}

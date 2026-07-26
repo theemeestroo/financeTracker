@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { NativeSelect } from "@/components/ui/native-select";
-import { COMMITMENT_CATEGORIES } from "@/lib/types";
+import { COMMITMENT_CATEGORIES, type HouseholdMember } from "@/lib/types";
 
-export function CommitmentFilters() {
+export function CommitmentFilters({ members }: { members: HouseholdMember[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -19,18 +20,38 @@ export function CommitmentFilters() {
     router.push(`${pathname}?${params.toString()}`);
   }
 
+  const activeOwner = searchParams.get("owner") ?? "all";
+  const ownerTabs = [
+    { value: "all", label: "Everyone" },
+    { value: "household", label: "Household" },
+    ...members.map((m) => ({ value: m.id, label: m.name })),
+  ];
+
   return (
-    <div className="flex gap-2">
-      <NativeSelect
-        aria-label="Filter by ownership"
-        className="w-auto"
-        defaultValue={searchParams.get("ownership") ?? "all"}
-        onChange={(e) => setParam("ownership", e.target.value)}
+    <div className="flex flex-wrap items-center gap-2">
+      <div
+        role="tablist"
+        aria-label="Filter by who it's linked to"
+        className="flex flex-wrap gap-1 rounded-full border border-border bg-secondary p-1"
       >
-        <option value="all">All ownership</option>
-        <option value="shared">Shared</option>
-        <option value="individual">Individual</option>
-      </NativeSelect>
+        {ownerTabs.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            role="tab"
+            aria-selected={activeOwner === tab.value}
+            onClick={() => setParam("owner", tab.value)}
+            className={cn(
+              "rounded-full px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors",
+              activeOwner === tab.value
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
       <NativeSelect
         aria-label="Filter by category"
         className="w-auto"

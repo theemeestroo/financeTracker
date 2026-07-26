@@ -15,6 +15,16 @@ const IncomeSchema = z
     frequency: z.enum(["monthly", "quarterly", "annual"]),
     start_date: z.string().optional(),
     end_date: z.string().optional(),
+    // Salary-only components — the form only renders these inputs when
+    // type is "salary", so absent/blank always means "not applicable",
+    // never "unset", hence the plain 0 fallback in parseIncomeForm below.
+    christmas_bonus_pct: z.coerce.number().min(0).max(300),
+    holiday_pay_pct: z.coerce.number().min(0).max(300),
+    annual_bonus: z.coerce.number().min(0),
+    bonus_distribution: z.enum(["one_time", "spread"]),
+    annual_car_allowance: z.coerce.number().min(0),
+    monthly_pension_contribution: z.coerce.number().min(0),
+    monthly_company_car_cost: z.coerce.number().min(0),
   })
   .refine(
     (data) => !data.start_date || !data.end_date || data.end_date >= data.start_date,
@@ -32,6 +42,13 @@ function parseIncomeForm(formData: FormData) {
     frequency: formData.get("frequency"),
     start_date: formData.get("start_date") || undefined,
     end_date: formData.get("end_date") || undefined,
+    christmas_bonus_pct: formData.get("christmas_bonus_pct") || 0,
+    holiday_pay_pct: formData.get("holiday_pay_pct") || 0,
+    annual_bonus: formData.get("annual_bonus") || 0,
+    bonus_distribution: formData.get("bonus_distribution") || "one_time",
+    annual_car_allowance: formData.get("annual_car_allowance") || 0,
+    monthly_pension_contribution: formData.get("monthly_pension_contribution") || 0,
+    monthly_company_car_cost: formData.get("monthly_company_car_cost") || 0,
   });
 }
 
@@ -50,7 +67,9 @@ export async function createIncome(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in." };
 
-  const profileId = await getBaselineProfileId(supabase);
+  const profileId =
+    (formData.get("profile_id") as string | null) || (await getBaselineProfileId(supabase));
+  const redirectTo = (formData.get("redirect_to") as string | null) || "/income";
 
   const { error } = await supabase.from("income").insert({
     ...validated.data,
@@ -63,7 +82,8 @@ export async function createIncome(
   if (error) return { error: error.message };
 
   revalidatePath("/income");
-  redirect("/income");
+  revalidatePath(redirectTo);
+  redirect(redirectTo);
 }
 
 export async function updateIncome(
@@ -92,8 +112,9 @@ export async function updateIncome(
   redirect("/income");
 }
 
-export async function deleteIncome(id: string) {
+export async function deleteIncome(id: string, revalidateTarget = "/income") {
   const supabase = await createClient();
   await supabase.from("income").delete().eq("id", id);
   revalidatePath("/income");
+  revalidatePath(revalidateTarget);
 }

@@ -1,8 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppSidebar } from "@/components/app-sidebar";
-import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
-import { Separator } from "@/components/ui/separator";
 
 export default async function AppLayout({
   children,
@@ -19,15 +17,11 @@ export default async function AppLayout({
   }
 
   return (
-    <SidebarProvider>
+    <div className="flex min-h-svh w-full flex-col gap-4 bg-background p-3 md:flex-row md:gap-5 md:p-5">
       <AppSidebar userEmail={user.email ?? ""} />
-      <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger />
-          <Separator orientation="vertical" className="h-4" />
-        </header>
-        <main className="flex flex-1 flex-col gap-4 p-6">{children}</main>
-      </SidebarInset>
-    </SidebarProvider>
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[2rem] bg-content-panel">
+        <div className="flex-1 overflow-y-auto p-5 md:p-8">{children}</div>
+      </main>
+    </div>
   );
 }

@@ -84,11 +84,23 @@ commitments (
   amount numeric(10,2) not null,
   frequency text not null,          -- monthly | quarterly | annual | one_off
   essential boolean not null default true,
-  ownership text not null default 'shared', -- shared | individual
-  household_member_id uuid references household_members, -- required when ownership = 'individual', null when shared
   start_date date not null,         -- for one_off frequency, this is the single occurrence date; end_date ignored
   end_date date,                    -- nullable = ongoing (ignored for one_off)
   created_at timestamptz default now()
+)
+
+-- Who a commitment is attributed to, and in what proportion. Zero rows for a
+-- commitment = a general household cost attributed to no one in particular.
+-- One row at 100% = fully individual. Two or more rows (summing to 100%) =
+-- shared, split by percentage — e.g. rent split 60/40 between two partners.
+commitment_splits (
+  id uuid pk default gen_random_uuid(),
+  user_id uuid not null,
+  commitment_id uuid references commitments not null,
+  household_member_id uuid references household_members not null,
+  percentage numeric(5,2) not null, -- 0 < percentage <= 100
+  created_at timestamptz default now(),
+  unique (commitment_id, household_member_id)
 )
 
 -- Income sources
@@ -197,7 +209,8 @@ severance_scenario_phases (
 Notes vs. PRD draft:
 - Added `tax_profiles` as its own table (PRD §7 sketched it inline) since a household member needs one profile reused across their income entries and severance scenarios.
 - Added `tax_year_parameters` — German tax brackets/rates change annually; hardcoding them defeats the "reviewable independently" goal in PRD §6.4. This table (or an equivalent versioned config module — see §5) lets a new year's rules be added without a code change to the calculation logic.
-- Widened `commitments` beyond recurring bills: added `ownership` (`shared` vs. `individual`, with `household_member_id` when individual — mirrors how `income` already attaches to a member) and a `one_off` frequency plus a broader category set, so a single purchase or one person's personal outgoing — not just joint household bills — can be tracked alongside recurring shared commitments.
+- Widened `commitments` beyond recurring bills: added a `one_off` frequency plus a broader category set, so a single purchase — not just recurring joint household bills — can be tracked alongside the rest.
+- Added `commitment_splits` as a many-to-many join (commitment ↔ household member, with a percentage) rather than the simpler `shared`/`individual` + single `household_member_id` pair the first draft of this schema used. A binary flag can't express "rent split 60/40 between two partners" — only "shared" (unattributed) or "one person, 100%". The join table handles all three cases uniformly: zero rows = unattributed household cost, one row at 100% = individual, two or more rows summing to 100% = a percentage split. Every view that shows "whose cost is this" (commitments table, dashboard category breakdown, the owner filter) prorates by `percentage` when scoped to one person, rather than double-counting the full amount for everyone it's split between.
 - Renamed `scenarios`/`scenario_events` to `severance_scenarios`/`severance_scenario_events` and expanded the scenario from a single manually-entered gross figure into a full **severance package calculator** (base salary, bonus, car benefit, years of service, multiplier, garden leave/notice pay, optional override) — modeled directly on the `severance-scenarios.jsx` mock — so the negotiation-sizing inputs are persisted and re-computable, not a one-off spreadsheet-style calculation done outside the app.
 - `severance_scenario_events` folds "new part-time job" and "one-off cost" into one table with an `event_type` discriminator rather than two separate tables, since both are timeline events a scenario projection walks through in order.
 - Added `living_profiles` plus a `profile_id` on both `commitments` and `income`, and a new `severance_scenario_phases` join table, so a scenario can model a wholesale change of living situation mid-timeline (e.g. drop all German outgoings and move to Thailand, or sell up and downsize) rather than only incremental one-off events. **Design choice**: generalized the existing `commitments`/`income` tables to belong to a profile (baseline = your real current household, by default) rather than building a separate scenario-only override system. This costs one FK on each table but means the exact same CRUD/UI built in Phase 1 is reused to build out an alternate profile — no parallel "scenario commitments" editor needed — and an alternate profile (e.g. "Thailand") is a reusable, nameable thing you can attach to more than one scenario. Profiles are **live, not snapshotted**: editing a profile's line items updates every scenario phase referencing it going forward, consistent with how editing a baseline commitment already changes today's dashboard — this intentionally differs from the severance package snapshot in §6, which *is* frozen per-scenario, because the two have different jobs (replaying a fixed negotiation input vs. iterating on a "what would this budget actually look like" estimate).
@@ -256,7 +269,7 @@ Algorithm: walk month-by-month from `severance_start_date`:
 2. If `include_garden_leave`, prepend `notice_period_months` of net monthly salary (via the tax engine, on `monthly_base_salary`) before the lump-sum starting balance applies.
 3. Once the notice period (if any) ends, start the balance at `starting_balance` (net severance + any existing buffer).
 4. Each month, determine the **active profile** — the phase with the latest `start_date <= current month` — and subtract/add *that profile's* commitments and income only. Switching profiles at a phase boundary is a wholesale swap of the recurring cost/income base (e.g. every German commitment drops off, a smaller Thailand set picks up), not an incremental diff against the previous phase.
-5. Within the active profile, commitments are subtracted **shared and individual alike** (monthly-equivalent, respecting each commitment's own `start_date`/`end_date` *within* the profile — so e.g. a Thailand lease starting a month after landing doesn't need its own phase; `one_off` commitments apply in their occurrence month only), and income is added net (via the tax engine, respecting `start_date`/`end_date`).
+5. Within the active profile, every commitment is subtracted at its **full amount** regardless of how its `commitment_splits` attribute it to household members (monthly-equivalent, respecting each commitment's own `start_date`/`end_date` *within* the profile — so e.g. a Thailand lease starting a month after landing doesn't need its own phase; `one_off` commitments apply in their occurrence month only), and income is added net (via the tax engine, respecting `start_date`/`end_date`). Splits only matter for *whose* view a cost shows up in (commitments table, dashboard), never for the household-wide runway total.
 6. Apply any `severance_scenario_events` dated in that month (one-off in/outflows, or activate a `recurring_income_start` event from that month on) — these are scenario-level and apply regardless of which profile is active.
 7. Record the running balance; stop either at a configurable horizon (e.g. 10 years) or once the trend makes depletion/non-depletion clear.
 8. Depletion date = first month balance crosses zero (or `null` if it never does within the horizon — i.e., the scenario is sustainable).
@@ -269,7 +282,7 @@ No REST/GraphQL API surface needed — Server Actions colocated with routes, sin
 
 | Action | Purpose |
 |---|---|
-| `createCommitment` / `updateCommitment` / `deleteCommitment` | Commitments CRUD, incl. ownership + one-off entries |
+| `createCommitment` / `updateCommitment` / `deleteCommitment` | Commitments CRUD, incl. member splits + one-off entries |
 | `createIncome` / `updateIncome` / `deleteIncome` | Income CRUD |
 | `upsertTaxProfile` | Per-household-member tax parameters |
 | `createLivingProfile` / `updateLivingProfile` / `deleteLivingProfile` | Living profile CRUD (baseline profile is seeded per user and cannot be deleted) |
@@ -290,7 +303,7 @@ app/
     page.tsx                 -- overview: surplus/deficit, category chart, owner filter
     loading.tsx / error.tsx
   commitments/
-    page.tsx                 -- baseline Living Profile only; table + total monthly-equivalent, filterable by shared/individual and category
+    page.tsx                 -- baseline Living Profile only; table + total monthly-equivalent, filterable by linked household member and category
     new/ [id]/edit
   income/
     page.tsx                 -- baseline Living Profile only
@@ -329,14 +342,14 @@ Each phase ends in a usable, demo-able state. Ordered so the riskiest/most load-
 
 ### Phase 1 — Commitments & Income CRUD
 - Full CRUD for `household_members`, `income` (forms with zod validation, tables per `claude.md` conventions).
-- Commitments CRUD covering all household outgoings — recurring **and** one-off — with an `ownership` flag (shared vs. a specific household member) and the expanded category set (housing, utilities, insurance, subscriptions, debt/loans, transport, childcare/education, healthcare, groceries & living, leisure/discretionary, savings/investment, one-off, other).
-- `toMonthlyEquivalent` helper; commitments table shows total monthly-equivalent cost, filterable by ownership and category.
+- Commitments CRUD covering all household outgoings — recurring **and** one-off — with a `commitment_splits` percentage split across zero, one, or several household members, and the expanded category set (housing, utilities, insurance, subscriptions, debt/loans, transport, childcare/education, healthcare, groceries & living, leisure/discretionary, savings/investment, one-off, other).
+- `toMonthlyEquivalent` helper; commitments table shows total monthly-equivalent cost, filterable by linked household member and category, with per-member amounts prorated by their split percentage.
 - All commitments/income created here are implicitly scoped to the baseline `living_profile` — the `profile_id` field exists from day one (§4) but stays invisible until Phase 5 introduces alternate profiles.
 - **Done when**: PRD §6.1/§6.2 fully usable — you can enter your actual current commitments (joint and personal, recurring and one-off) and income sources.
 
 ### Phase 2 — Dashboard / Overview
 - Monthly surplus/deficit card (gross figures for now — net comes in Phase 3).
-- Category breakdown chart (Recharts), with an owner filter (shared / per household member).
+- Category breakdown chart (Recharts), with an owner filter (whole household / unattributed / per household member, prorated by split percentage).
 - Empty states with CTAs where no data yet.
 - **Done when**: PRD success criterion "what's our monthly surplus right now?" is answerable at a glance — with the caveat it's still gross, flagged in the UI until Phase 3 lands.
 
@@ -385,7 +398,7 @@ Each phase ends in a usable, demo-able state. Ordered so the riskiest/most load-
 
 ## 12. Risks / Open Items
 
-- **Tax rule accuracy** is the main technical risk — German wage tax + social insurance has real edge cases (private health insurance, multiple tax classes, high-earner soli threshold, capped contribution bases). Phase 3 scope is deliberately the standard-case-done-properly bar the PRD sets, not bulletproof edge-case coverage.
+- **Tax rule accuracy** is the main technical risk — German wage tax + social insurance has real edge cases (private health insurance, multiple tax classes, high-earner soli threshold, capped contribution bases). Phase 3 scope is deliberately the standard-case-done-properly bar the PRD sets, not bulletproof edge-case coverage. Concretely: tax classes I/II/III/IV are computed properly (including the Splittingverfahren for III and the Entlastungsbetrag for II); classes V and VI are a documented approximation (standard tariff, no allowances) since their real withholding procedure depends on the paired spouse's return (V) or drops the Grundfreibetrag in a way that isn't a simple closed-form (VI) — see `lib/tax/wage-tax.ts`. The §32a formula itself is verified against independently-published reference figures in `lib/tax/wage-tax.test.ts`, not just self-consistency.
 - **Severance multiplier is a negotiation input, not a statutory formula** — beyond the small statutory minimum, the multiplier/garden-leave terms in §6 are what you're aiming to negotiate, not a guaranteed entitlement. The calculator sizes and compares "what if" packages; it doesn't predict what an employer will actually agree to.
 - **`tax_year_parameters` maintenance**: this needs a manual update once a year when official figures are published (typically ~Nov/Dec for the following year). Worth a short runbook note at the end of Phase 8.
 - **Living profiles are live, not snapshotted** (§4) — editing an alternate profile's line items changes the projected numbers for every scenario phase referencing it, including ones you already reviewed. Intentional (you're iterating on "what would this budget look like"), but worth a visible "last edited" indicator in Phase 5 so an old scenario comparison isn't silently stale.

@@ -13,7 +13,7 @@ export default async function NewIncomePage() {
   return (
     <div className="flex max-w-lg flex-col gap-6">
       <div>
-        <h1 className="text-lg font-semibold tracking-tight">Add income</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Add income</h1>
       </div>
       <IncomeForm action={createIncome} members={(members ?? []) as HouseholdMember[]} />
     </div>
