@@ -3,14 +3,18 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getBaselineProfileId } from "@/lib/finance/baseline-profile";
 
 const IncomeSchema = z
   .object({
     name: z.string().trim().min(1, { message: "Name is required." }),
-    household_member_id: z.string().trim().min(1, { message: "Select a household member." }),
     gross_amount: z.coerce.number().positive({ message: "Amount must be greater than 0." }),
+    currency: z.enum(["EUR", "GBP"]),
+    // Only shown (and editable) in the form when currency isn't EUR — an
+    // EUR row is always exactly 1, no conversion to apply.
+    exchange_rate_to_eur: z.coerce.number().positive({ message: "Exchange rate must be greater than 0." }),
     type: z.enum(["salary", "part_time", "rental", "other"]),
     frequency: z.enum(["monthly", "quarterly", "annual"]),
     start_date: z.string().optional(),
@@ -25,6 +29,10 @@ const IncomeSchema = z
     annual_car_allowance: z.coerce.number().min(0),
     monthly_pension_contribution: z.coerce.number().min(0),
     monthly_company_car_cost: z.coerce.number().min(0),
+    // Rental-only — the form only renders this input when type is
+    // "rental", so absent/blank means "not applicable" (0), same as the
+    // salary-only fields above.
+    rental_overhead_pct: z.coerce.number().min(0).max(100),
   })
   .refine(
     (data) => !data.start_date || !data.end_date || data.end_date >= data.start_date,
@@ -33,11 +41,56 @@ const IncomeSchema = z
 
 export type FormState = { error?: string } | undefined;
 
+const SPLIT_FIELD = /^splits\[(.+)\]$/;
+
+/** Reads `splits[<memberId>]` percentage fields off the form. */
+function parseSplits(formData: FormData): { household_member_id: string; percentage: number }[] {
+  const splits: { household_member_id: string; percentage: number }[] = [];
+  for (const [key, value] of formData.entries()) {
+    const match = key.match(SPLIT_FIELD);
+    if (!match) continue;
+    const percentage = Number(value);
+    if (percentage > 0) splits.push({ household_member_id: match[1], percentage });
+  }
+  // A single link is always fully attributed, regardless of what was submitted.
+  if (splits.length === 1) splits[0].percentage = 100;
+  return splits;
+}
+
+function validateSplits(splits: { percentage: number }[]): string | null {
+  if (splits.length < 2) return null;
+  const total = splits.reduce((sum, s) => sum + s.percentage, 0);
+  if (Math.abs(total - 100) > 0.5) {
+    return `The split must add up to 100% (currently ${total}%).`;
+  }
+  return null;
+}
+
+async function replaceSplits(
+  supabase: SupabaseClient,
+  userId: string,
+  incomeId: string,
+  splits: { household_member_id: string; percentage: number }[]
+) {
+  await supabase.from("income_splits").delete().eq("income_id", incomeId);
+  if (splits.length > 0) {
+    await supabase.from("income_splits").insert(
+      splits.map((s) => ({
+        user_id: userId,
+        income_id: incomeId,
+        household_member_id: s.household_member_id,
+        percentage: s.percentage,
+      }))
+    );
+  }
+}
+
 function parseIncomeForm(formData: FormData) {
   return IncomeSchema.safeParse({
     name: formData.get("name"),
-    household_member_id: formData.get("household_member_id"),
     gross_amount: formData.get("gross_amount"),
+    currency: formData.get("currency") || "EUR",
+    exchange_rate_to_eur: formData.get("exchange_rate_to_eur") || 1,
     type: formData.get("type"),
     frequency: formData.get("frequency"),
     start_date: formData.get("start_date") || undefined,
@@ -49,6 +102,7 @@ function parseIncomeForm(formData: FormData) {
     annual_car_allowance: formData.get("annual_car_allowance") || 0,
     monthly_pension_contribution: formData.get("monthly_pension_contribution") || 0,
     monthly_company_car_cost: formData.get("monthly_company_car_cost") || 0,
+    rental_overhead_pct: formData.get("rental_overhead_pct") || 0,
   });
 }
 
@@ -61,6 +115,10 @@ export async function createIncome(
     return { error: validated.error.issues[0].message };
   }
 
+  const splits = parseSplits(formData);
+  const splitError = validateSplits(splits);
+  if (splitError) return { error: splitError };
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -71,15 +129,21 @@ export async function createIncome(
     (formData.get("profile_id") as string | null) || (await getBaselineProfileId(supabase));
   const redirectTo = (formData.get("redirect_to") as string | null) || "/income";
 
-  const { error } = await supabase.from("income").insert({
-    ...validated.data,
-    start_date: validated.data.start_date || null,
-    end_date: validated.data.end_date || null,
-    user_id: user.id,
-    profile_id: profileId,
-  });
+  const { data: income, error } = await supabase
+    .from("income")
+    .insert({
+      ...validated.data,
+      start_date: validated.data.start_date || null,
+      end_date: validated.data.end_date || null,
+      user_id: user.id,
+      profile_id: profileId,
+    })
+    .select("id")
+    .single();
 
-  if (error) return { error: error.message };
+  if (error || !income) return { error: error?.message ?? "Could not create income." };
+
+  await replaceSplits(supabase, user.id, income.id, splits);
 
   revalidatePath("/income");
   revalidatePath(redirectTo);
@@ -96,7 +160,16 @@ export async function updateIncome(
     return { error: validated.error.issues[0].message };
   }
 
+  const splits = parseSplits(formData);
+  const splitError = validateSplits(splits);
+  if (splitError) return { error: splitError };
+
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+
   const { error } = await supabase
     .from("income")
     .update({
@@ -107,6 +180,8 @@ export async function updateIncome(
     .eq("id", id);
 
   if (error) return { error: error.message };
+
+  await replaceSplits(supabase, user.id, id, splits);
 
   revalidatePath("/income");
   redirect("/income");

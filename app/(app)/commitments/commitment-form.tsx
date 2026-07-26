@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -13,6 +14,8 @@ import {
   type CommitmentFrequency,
   type CommitmentSplit,
   type HouseholdMember,
+  type Property,
+  type PropertySplit,
 } from "@/lib/types";
 import type { FormState } from "./actions";
 
@@ -21,6 +24,8 @@ export function CommitmentForm({
   members,
   defaultValues,
   defaultSplits,
+  properties,
+  propertySplitsByProperty,
   profileId,
   redirectTo,
 }: {
@@ -28,6 +33,10 @@ export function CommitmentForm({
   members: HouseholdMember[];
   defaultValues?: Partial<Commitment>;
   defaultSplits?: CommitmentSplit[];
+  /** Properties in scope for the linked picker, and their ownership splits —
+   *  used to prefill (not force) a commitment's split when first linked. */
+  properties?: Property[];
+  propertySplitsByProperty?: Map<string, PropertySplit[]>;
   /** Scopes the commitment to a non-baseline Living Profile (Phase 5). */
   profileId?: string;
   redirectTo?: string;
@@ -36,15 +45,36 @@ export function CommitmentForm({
   const [frequency, setFrequency] = useState<CommitmentFrequency>(
     defaultValues?.frequency ?? "monthly"
   );
+  const [propertyId, setPropertyId] = useState(defaultValues?.property_id ?? "");
+  // A preset property (e.g. adding a cost from the property's own page) with
+  // no split of its own yet seeds from that property's ownership split —
+  // same inherit-by-default behavior as picking one from the dropdown.
+  const initialSplits =
+    defaultSplits ??
+    (defaultValues?.property_id
+      ? propertySplitsByProperty?.get(defaultValues.property_id) ?? []
+      : []);
   const [checkedIds, setCheckedIds] = useState<string[]>(
-    defaultSplits?.map((s) => s.household_member_id) ?? []
+    initialSplits.map((s) => s.household_member_id)
   );
   const [percentages, setPercentages] = useState<Record<string, number>>(() =>
-    Object.fromEntries((defaultSplits ?? []).map((s) => [s.household_member_id, s.percentage]))
+    Object.fromEntries(initialSplits.map((s) => [s.household_member_id, s.percentage]))
   );
 
   function toggleMember(id: string) {
     setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  function handlePropertyChange(newPropertyId: string) {
+    setPropertyId(newPropertyId);
+    // Prefill (not force) the split from the property's ownership split —
+    // only on a user-initiated change, and only when one is actually picked.
+    if (!newPropertyId) return;
+    const propertySplits = propertySplitsByProperty?.get(newPropertyId) ?? [];
+    setCheckedIds(propertySplits.map((s) => s.household_member_id));
+    setPercentages(
+      Object.fromEntries(propertySplits.map((s) => [s.household_member_id, s.percentage]))
+    );
   }
 
   function splitEvenly() {
@@ -109,6 +139,25 @@ export function CommitmentForm({
           ))}
         </NativeSelect>
       </div>
+
+      {properties && properties.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="property_id">Property (optional)</Label>
+          <NativeSelect
+            id="property_id"
+            name="property_id"
+            value={propertyId}
+            onChange={(e) => handlePropertyChange(e.target.value)}
+          >
+            <option value="">— None —</option>
+            {properties.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </NativeSelect>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2 rounded-lg border p-3">
         <div className="flex items-center justify-between">
@@ -191,23 +240,12 @@ export function CommitmentForm({
           <Label htmlFor="start_date">
             {frequency === "one_off" ? "Date" : "Start date"}
           </Label>
-          <Input
-            id="start_date"
-            name="start_date"
-            type="date"
-            defaultValue={defaultValues?.start_date}
-            required
-          />
+          <DatePicker id="start_date" name="start_date" defaultValue={defaultValues?.start_date} />
         </div>
         {frequency !== "one_off" && (
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="end_date">End date (optional)</Label>
-            <Input
-              id="end_date"
-              name="end_date"
-              type="date"
-              defaultValue={defaultValues?.end_date ?? undefined}
-            />
+            <DatePicker id="end_date" name="end_date" defaultValue={defaultValues?.end_date} />
           </div>
         )}
       </div>

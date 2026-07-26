@@ -4,13 +4,14 @@ import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { createLivingProfile, cloneLivingProfile, type FormState } from "./actions";
+import type { LivingProfile } from "@/lib/types";
 
-export function NewProfileForm({ baselineProfileId }: { baselineProfileId: string | null }) {
-  const [cloneBaseline, setCloneBaseline] = useState(true);
-  const action = cloneBaseline && baselineProfileId
-    ? cloneLivingProfile.bind(null, baselineProfileId)
-    : createLivingProfile;
+export function NewProfileForm({ profiles }: { profiles: LivingProfile[] }) {
+  const baselineId = profiles.find((p) => p.is_baseline)?.id ?? "";
+  const [sourceId, setSourceId] = useState(baselineId);
+  const action = sourceId ? cloneLivingProfile.bind(null, sourceId) : createLivingProfile;
   const [state, formAction, pending] = useActionState<FormState, FormData>(action, undefined);
 
   return (
@@ -25,16 +26,24 @@ export function NewProfileForm({ baselineProfileId }: { baselineProfileId: strin
           <Input id="profile_description" name="description" />
         </div>
       </div>
-      {baselineProfileId && (
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={cloneBaseline}
-            onChange={(e) => setCloneBaseline(e.target.checked)}
-            className="size-4 rounded border-input accent-foreground"
-          />
-          Start from a copy of the baseline (recommended — then edit down)
-        </label>
+      {profiles.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="profile_source">Start from</Label>
+          <NativeSelect
+            id="profile_source"
+            value={sourceId}
+            onChange={(e) => setSourceId(e.target.value)}
+            className="max-w-72"
+          >
+            <option value="">Start fresh (no commitments/income)</option>
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                Copy of {p.name}
+                {p.is_baseline ? " (baseline)" : ""}
+              </option>
+            ))}
+          </NativeSelect>
+        </div>
       )}
       {state?.error && (
         <p role="alert" className="text-sm text-destructive">

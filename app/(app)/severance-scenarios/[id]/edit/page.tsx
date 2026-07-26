@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ScenarioForm } from "../../scenario-form";
 import { updateScenario } from "../../actions";
-import type { HouseholdMember, SeveranceScenario } from "@/lib/types";
+import type { SeveranceScenario } from "@/lib/types";
 
 export default async function EditScenarioPage({
   params,
@@ -12,10 +12,11 @@ export default async function EditScenarioPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: scenario }, { data: members }] = await Promise.all([
-    supabase.from("severance_scenarios").select("*").eq("id", id).single(),
-    supabase.from("household_members").select("id, name, created_at").order("name"),
-  ]);
+  const { data: scenario } = await supabase
+    .from("severance_scenarios")
+    .select("id, name, starting_balance, notes")
+    .eq("id", id)
+    .single();
 
   if (!scenario) notFound();
 
@@ -26,7 +27,6 @@ export default async function EditScenarioPage({
       </div>
       <ScenarioForm
         action={updateScenario.bind(null, id)}
-        members={(members ?? []) as HouseholdMember[]}
         defaultValues={scenario as SeveranceScenario}
       />
     </div>

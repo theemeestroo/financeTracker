@@ -22,8 +22,9 @@ export function CommitmentFilters({ members }: { members: HouseholdMember[] }) {
 
   const activeOwner = searchParams.get("owner") ?? "all";
   const ownerTabs = [
-    { value: "all", label: "Everyone" },
+    { value: "all", label: "All" },
     { value: "household", label: "Household" },
+    { value: "non-household", label: "Non household" },
     ...members.map((m) => ({ value: m.id, label: m.name })),
   ];
 

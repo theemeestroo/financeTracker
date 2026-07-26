@@ -1,2 +1,2 @@
-# financeTracker
-Finance Tracker
+# Runaway
+Household financial runway tracker.

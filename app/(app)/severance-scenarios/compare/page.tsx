@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table";
 import { ComparisonChart, type ComparisonSeries } from "@/components/charts/comparison-chart";
 import { formatEUR } from "@/lib/finance/frequency";
+import { formatDateDisplay } from "@/lib/finance/date-utils";
 import type { SeveranceScenario } from "@/lib/types";
 import { ScenarioPicker } from "./scenario-picker";
 
@@ -165,7 +166,7 @@ async function ComparisonResults({ scenarios }: { scenarios: SeveranceScenario[]
                         variant="outline"
                         style={{ borderColor: "var(--status-critical)", color: "var(--status-critical)" }}
                       >
-                        {runway.depletionDate}
+                        {formatDateDisplay(runway.depletionDate)}
                       </Badge>
                     ) : (
                       <Badge

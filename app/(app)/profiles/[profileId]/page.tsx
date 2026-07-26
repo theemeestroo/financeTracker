@@ -11,11 +11,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { DeleteButton } from "@/components/delete-button";
-import { toMonthlyEquivalent, formatEUR } from "@/lib/finance/frequency";
+import { CurrencyAmount } from "@/components/currency-amount";
+import { toMonthlyEquivalent, formatEUR, sortCommitmentsByCost } from "@/lib/finance/frequency";
 import { incomeGrossBreakdown } from "@/lib/finance/income-gross";
 import { splitLabel } from "@/lib/finance/splits";
+import { propertiesWithSplits } from "@/lib/finance/property-splits";
 import { COMMITMENT_CATEGORIES, COMMITMENT_FREQUENCIES } from "@/lib/types";
-import type { Commitment, CommitmentSplit, HouseholdMember, Income } from "@/lib/types";
+import type { Commitment, CommitmentSplit, HouseholdMember, Income, IncomeSplit } from "@/lib/types";
 import { updateLivingProfile } from "../actions";
 import { CommitmentForm } from "../../commitments/commitment-form";
 import { createCommitment, deleteCommitment } from "../../commitments/actions";
@@ -53,7 +55,7 @@ export default async function LivingProfilePage({
       supabase
         .from("income")
         .select(
-          "id, profile_id, household_member_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost"
+          "id, profile_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, currency, exchange_rate_to_eur"
         )
         .eq("profile_id", profileId)
         .order("name"),
@@ -61,6 +63,8 @@ export default async function LivingProfilePage({
     ]);
 
   if (!profile) notFound();
+
+  const { properties, splitsByProperty } = await propertiesWithSplits(supabase, profileId);
 
   const commitmentRows = (commitments ?? []) as Commitment[];
   const incomeRows = (income ?? []) as Income[];
@@ -78,6 +82,15 @@ export default async function LivingProfilePage({
       ...(splitsByCommitment.get(s.commitment_id) ?? []),
       s,
     ]);
+  }
+
+  const { data: incomeSplitRows } = await supabase
+    .from("income_splits")
+    .select("id, income_id, household_member_id, percentage")
+    .in("income_id", incomeRows.map((i) => i.id));
+  const splitsByIncome = new Map<string, IncomeSplit[]>();
+  for (const s of (incomeSplitRows ?? []) as IncomeSplit[]) {
+    splitsByIncome.set(s.income_id, [...(splitsByIncome.get(s.income_id) ?? []), s]);
   }
 
   const totalMonthlyCommitments = commitmentRows.reduce(
@@ -103,22 +116,20 @@ export default async function LivingProfilePage({
         </div>
       </div>
 
-      {!profile.is_baseline && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-              Rename / describe
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <RenameProfileForm
-              action={updateLivingProfile.bind(null, profileId)}
-              defaultName={profile.name}
-              defaultDescription={profile.description ?? ""}
-            />
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Rename / describe
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RenameProfileForm
+            action={updateLivingProfile.bind(null, profileId)}
+            defaultName={profile.name}
+            defaultDescription={profile.description ?? ""}
+          />
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card>
@@ -173,7 +184,7 @@ export default async function LivingProfilePage({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {commitmentRows.map((c) => (
+                {sortCommitmentsByCost(commitmentRows).map((c) => (
                   <TableRow key={c.id}>
                     <TableCell className="font-medium">{c.name}</TableCell>
                     <TableCell>{categoryLabel(c.category)}</TableCell>
@@ -199,6 +210,8 @@ export default async function LivingProfilePage({
               <CommitmentForm
                 action={createCommitment}
                 members={householdMembers}
+                properties={properties}
+                propertySplitsByProperty={splitsByProperty}
                 profileId={profileId}
                 redirectTo={redirectTo}
               />
@@ -217,6 +230,7 @@ export default async function LivingProfilePage({
               <TableHeader>
                 <TableRow>
                   <TableHead scope="col">Name</TableHead>
+                  <TableHead scope="col">Linked to</TableHead>
                   <TableHead scope="col" className="text-right">
                     Gross amount
                   </TableHead>
@@ -230,8 +244,13 @@ export default async function LivingProfilePage({
                 {incomeRows.map((i) => (
                   <TableRow key={i.id}>
                     <TableCell className="font-medium">{i.name}</TableCell>
+                    <TableCell>{splitLabel(splitsByIncome.get(i.id) ?? [], memberById)}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {formatEUR(i.gross_amount)}
+                      <CurrencyAmount
+                        amount={i.gross_amount}
+                        currency={i.currency}
+                        exchangeRateToEur={i.exchange_rate_to_eur}
+                      />
                     </TableCell>
                     <TableCell>{frequencyLabel(i.frequency)}</TableCell>
                     <TableCell className="text-right">

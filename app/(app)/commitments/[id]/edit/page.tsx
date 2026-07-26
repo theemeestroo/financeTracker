@@ -2,20 +2,26 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { CommitmentForm } from "../../commitment-form";
 import { updateCommitment } from "../../actions";
+import { propertiesWithSplits } from "@/lib/finance/property-splits";
 import type { Commitment, CommitmentSplit, HouseholdMember } from "@/lib/types";
 
 export default async function EditCommitmentPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ redirectTo?: string }>;
 }) {
   const { id } = await params;
+  const { redirectTo } = await searchParams;
   const supabase = await createClient();
 
   const [{ data: commitment }, { data: members }, { data: splits }] = await Promise.all([
     supabase
       .from("commitments")
-      .select("id, profile_id, name, category, amount, frequency, essential, start_date, end_date")
+      .select(
+        "id, profile_id, name, category, amount, frequency, essential, start_date, end_date, property_id"
+      )
       .eq("id", id)
       .single(),
     supabase.from("household_members").select("id, name, created_at").order("name"),
@@ -27,6 +33,11 @@ export default async function EditCommitmentPage({
 
   if (!commitment) notFound();
 
+  const { properties, splitsByProperty } = await propertiesWithSplits(
+    supabase,
+    (commitment as Commitment).profile_id
+  );
+
   return (
     <div className="flex max-w-lg flex-col gap-6">
       <div>
@@ -37,6 +48,9 @@ export default async function EditCommitmentPage({
         members={(members ?? []) as HouseholdMember[]}
         defaultValues={commitment as Commitment}
         defaultSplits={(splits ?? []) as CommitmentSplit[]}
+        properties={properties}
+        propertySplitsByProperty={splitsByProperty}
+        redirectTo={redirectTo}
       />
     </div>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { PlaneTakeoff } from "lucide-react";
 import { login } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,10 +16,10 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <div className="mb-2 flex items-center gap-2.5">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-sm font-bold text-primary-foreground">
-              FR
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+              <PlaneTakeoff className="size-4.5" />
             </span>
-            <span className="text-base font-semibold tracking-tight">Runway</span>
+            <span className="text-base font-semibold tracking-tight">Runaway</span>
           </div>
           <CardTitle className="text-xl font-bold tracking-tight">Sign in</CardTitle>
         </CardHeader>

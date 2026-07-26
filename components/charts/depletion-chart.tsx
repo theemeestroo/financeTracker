@@ -2,8 +2,9 @@
 
 import {
   Area,
-  AreaChart,
+  Bar,
   CartesianGrid,
+  ComposedChart,
   ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
@@ -12,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { formatEUR } from "@/lib/finance/frequency";
+import { formatMonthDisplay } from "@/lib/finance/date-utils";
 import type { RunwayPoint } from "@/lib/runway";
 
 function ChartTooltip({
@@ -27,8 +29,15 @@ function ChartTooltip({
   const point = payload[0].payload;
   return (
     <div className="rounded-2xl border border-border bg-popover px-3.5 py-2.5 text-sm shadow-sm">
-      <div className="font-medium text-popover-foreground">{label}</div>
-      <div className="tabular-nums text-muted-foreground">{formatEUR(point.balance)}</div>
+      <div className="font-medium text-popover-foreground">
+        {label ? formatMonthDisplay(label) : label}
+      </div>
+      <div className="tabular-nums text-muted-foreground">Balance: {formatEUR(point.balance)}</div>
+      {point.monthlyCost != null && (
+        <div className="tabular-nums text-muted-foreground">
+          Monthly cost: {formatEUR(point.monthlyCost)}
+        </div>
+      )}
     </div>
   );
 }
@@ -41,11 +50,12 @@ export function DepletionChart({
   depletionDate: string | null;
 }) {
   const depletionPoint = depletionDate ? series.find((p) => p.date === depletionDate) : undefined;
+  const showCost = series.some((p) => p.monthlyCost != null);
   const gradientId = "depletion-fill";
 
   return (
     <ResponsiveContainer width="100%" height={280}>
-      <AreaChart data={series} margin={{ top: 8, right: 16, bottom: 0, left: 8 }}>
+      <ComposedChart data={series} margin={{ top: 8, right: 16, bottom: 0, left: 8 }}>
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--chart-5)" stopOpacity={0.22} />
@@ -55,22 +65,46 @@ export function DepletionChart({
         <CartesianGrid vertical={false} stroke="var(--border)" />
         <XAxis
           dataKey="date"
-          tickFormatter={(d: string) => d.slice(0, 7)}
+          tickFormatter={(d: string) => formatMonthDisplay(d)}
           tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
           axisLine={false}
           tickLine={false}
           minTickGap={40}
         />
         <YAxis
+          yAxisId="balance"
+          orientation="right"
           tickFormatter={(v: number) => formatEUR(v)}
           tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
           axisLine={false}
           tickLine={false}
           width={72}
         />
-        <ReferenceLine y={0} stroke="var(--muted-foreground)" strokeWidth={1} />
+        {showCost && (
+          <YAxis
+            yAxisId="cost"
+            orientation="left"
+            tickFormatter={(v: number) => formatEUR(v)}
+            tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+            axisLine={false}
+            tickLine={false}
+            width={72}
+          />
+        )}
+        <ReferenceLine yAxisId="balance" y={0} stroke="var(--muted-foreground)" strokeWidth={1} />
         <Tooltip content={<ChartTooltip />} />
+        {showCost && (
+          <Bar
+            yAxisId="cost"
+            dataKey="monthlyCost"
+            fill="var(--chart-3)"
+            radius={[3, 3, 0, 0]}
+            maxBarSize={10}
+            isAnimationActive={false}
+          />
+        )}
         <Area
+          yAxisId="balance"
           type="monotone"
           dataKey="balance"
           stroke="var(--chart-5)"
@@ -81,6 +115,7 @@ export function DepletionChart({
         />
         {depletionPoint && (
           <ReferenceDot
+            yAxisId="balance"
             x={depletionPoint.date}
             y={depletionPoint.balance}
             r={5}
@@ -89,7 +124,7 @@ export function DepletionChart({
             strokeWidth={2}
           />
         )}
-      </AreaChart>
+      </ComposedChart>
     </ResponsiveContainer>
   );
 }

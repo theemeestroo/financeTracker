@@ -1,6 +1,7 @@
 import { toMonthlyEquivalent } from "./frequency";
 import { isActiveOn } from "./date-utils";
-import { incomeGrossBreakdown, incomeNetBreakdown } from "./income-gross";
+import { incomeGrossBreakdown, incomeNetBreakdownForRow } from "./income-gross";
+import type { Split } from "./splits";
 import {
   COMMITMENT_CATEGORIES,
   type Commitment,
@@ -31,11 +32,13 @@ export type NetIncomeTotals = {
 };
 
 /**
- * Nets each income row via its household member's tax profile. Rows whose
- * member has no tax profile yet are excluded from the total (not
- * approximated as gross) and counted in `missingProfileCount` so the UI can
- * flag it — silently mixing gross and net would make the headline number
- * wrong in a way that's not visible.
+ * Nets each income row per split share via that person's own tax profile
+ * (lib/finance/income-gross.ts's `incomeNetBreakdownForRow`). Shares whose
+ * member has no tax profile yet — or a row with no split at all
+ * (household/unattributed income, no one to tax) — are excluded from the
+ * total (not approximated as gross) and counted in `missingProfileCount`
+ * so the UI can flag it — silently mixing gross and net would make the
+ * headline number wrong in a way that's not visible.
  *
  * This is the *recurring* monthly figure — a salary row's one-time annual
  * bonus (see lib/finance/income-gross.ts) is deliberately excluded so a
@@ -44,6 +47,7 @@ export type NetIncomeTotals = {
  */
 export function totalMonthlyNetIncome(
   income: Income[],
+  splitsByIncome: Map<string, Split[]>,
   taxProfileByMember: Map<string, TaxProfile>,
   year: number
 ): NetIncomeTotals {
@@ -51,12 +55,14 @@ export function totalMonthlyNetIncome(
   let missingProfileCount = 0;
 
   for (const i of income) {
-    const profile = taxProfileByMember.get(i.household_member_id);
-    if (!profile) {
-      missingProfileCount += 1;
-      continue;
-    }
-    netMonthly += incomeNetBreakdown(i, profile, year).recurringMonthlyNet;
+    const { net, missingShares } = incomeNetBreakdownForRow(
+      i,
+      splitsByIncome.get(i.id) ?? [],
+      taxProfileByMember,
+      year
+    );
+    netMonthly += net.recurringMonthlyNet;
+    missingProfileCount += missingShares;
   }
 
   return { netMonthly, missingProfileCount };

@@ -1,8 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { getBaselineProfileId } from "@/lib/finance/baseline-profile";
 import { toCSV } from "@/lib/finance/csv";
+import { splitLabel, type Split } from "@/lib/finance/splits";
 import { INCOME_BONUS_DISTRIBUTIONS, INCOME_FREQUENCIES, INCOME_TYPES } from "@/lib/types";
-import type { HouseholdMember, Income } from "@/lib/types";
+import type { HouseholdMember, Income, IncomeSplit } from "@/lib/types";
 
 const typeLabel = (v: string) => INCOME_TYPES.find((t) => t.value === v)?.label ?? v;
 const frequencyLabel = (v: string) =>
@@ -23,7 +24,7 @@ export async function GET() {
     supabase
       .from("income")
       .select(
-        "id, household_member_id, name, gross_amount, type, frequency, start_date, end_date, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost"
+        "id, name, gross_amount, type, frequency, start_date, end_date, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, currency, exchange_rate_to_eur"
       )
       .eq("profile_id", baselineProfileId)
       .order("name"),
@@ -33,12 +34,23 @@ export async function GET() {
   const rows = (income ?? []) as Income[];
   const memberById = new Map(((members ?? []) as HouseholdMember[]).map((m) => [m.id, m.name]));
 
+  const { data: splitRows } = await supabase
+    .from("income_splits")
+    .select("id, income_id, household_member_id, percentage")
+    .in("income_id", rows.map((i) => i.id));
+  const splitsByIncome = new Map<string, Split[]>();
+  for (const s of (splitRows ?? []) as IncomeSplit[]) {
+    splitsByIncome.set(s.income_id, [...(splitsByIncome.get(s.income_id) ?? []), s]);
+  }
+
   const csv = toCSV(
     rows.map((i) => ({
       name: i.name,
-      member: memberById.get(i.household_member_id) ?? "",
+      member: splitLabel(splitsByIncome.get(i.id) ?? [], memberById),
       type: typeLabel(i.type),
       gross_amount: i.gross_amount,
+      currency: i.currency,
+      exchange_rate_to_eur: i.currency === "EUR" ? "" : i.exchange_rate_to_eur,
       frequency: frequencyLabel(i.frequency),
       start_date: i.start_date ?? "",
       end_date: i.end_date ?? "",
@@ -49,12 +61,15 @@ export async function GET() {
       annual_car_allowance: i.type === "salary" ? i.annual_car_allowance : "",
       monthly_pension_contribution: i.type === "salary" ? i.monthly_pension_contribution : "",
       monthly_company_car_cost: i.type === "salary" ? i.monthly_company_car_cost : "",
+      rental_overhead_pct: i.type === "rental" ? i.rental_overhead_pct : "",
     })),
     [
       { key: "name", header: "Name" },
-      { key: "member", header: "Household member" },
+      { key: "member", header: "Linked to" },
       { key: "type", header: "Type" },
-      { key: "gross_amount", header: "Gross amount (EUR)" },
+      { key: "gross_amount", header: "Gross amount" },
+      { key: "currency", header: "Currency" },
+      { key: "exchange_rate_to_eur", header: "Exchange rate (1 unit = ? EUR)" },
       { key: "frequency", header: "Frequency" },
       { key: "start_date", header: "Start date" },
       { key: "end_date", header: "End date" },
@@ -65,6 +80,7 @@ export async function GET() {
       { key: "annual_car_allowance", header: "Car allowance (EUR/yr, reference only)" },
       { key: "monthly_pension_contribution", header: "Pension contribution (EUR/mo, reference only)" },
       { key: "monthly_company_car_cost", header: "Company car cost (EUR/mo, deducted from net)" },
+      { key: "rental_overhead_pct", header: "Rental overhead (%, reduces gross/net)" },
     ]
   );
 

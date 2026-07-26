@@ -33,6 +33,25 @@ export type Commitment = {
   essential: boolean;
   start_date: string;
   end_date: string | null;
+  property_id: string | null;
+};
+
+export type Property = {
+  id: string;
+  profile_id: string;
+  name: string;
+  address: string | null;
+  notes: string | null;
+  end_date: string | null;
+};
+
+/** Ownership split — same zero/one/many-row semantics as CommitmentSplit,
+ *  but independent of any commitment's own split. */
+export type PropertySplit = {
+  id: string;
+  property_id: string;
+  household_member_id: string;
+  percentage: number;
 };
 
 /**
@@ -90,9 +109,14 @@ export const GERMAN_STATES: { value: string; label: string }[] = [
 export type Income = {
   id: string;
   profile_id: string;
-  household_member_id: string;
   name: string;
+  /** In `currency`, not necessarily EUR — converted via `exchange_rate_to_eur`
+   *  before it feeds any gross/net figure or tax calculation. */
   gross_amount: number;
+  currency: Currency;
+  /** Manually entered: 1 unit of `currency` = this many EUR. Always 1 for
+   *  EUR rows (enforced by the form, not the DB). */
+  exchange_rate_to_eur: number;
   type: IncomeType;
   frequency: Frequency;
   start_date: string | null;
@@ -120,6 +144,21 @@ export type Income = {
    *  pay (unlike the other components above, this one does reduce net).
    *  Distinct from `annual_car_allowance`, which is cash received. */
   monthly_company_car_cost: number;
+  /** Rental-only — % of the raw rent held back for vacancy, maintenance,
+   *  etc. The adjusted amount (gross_amount × (1 − pct/100)), not the raw
+   *  rent, is what feeds gross/net income and gets taxed. Ignored for
+   *  non-rental rows. */
+  rental_overhead_pct: number;
+};
+
+/** Same zero/one/many-row semantics as CommitmentSplit/PropertySplit: zero
+ *  rows = household (unattributed) income, one row at 100% = fully
+ *  individual, two or more (summing to 100%) = shared by percentage. */
+export type IncomeSplit = {
+  id: string;
+  income_id: string;
+  household_member_id: string;
+  percentage: number;
 };
 
 export type BonusDistribution = "one_time" | "spread";
@@ -165,6 +204,13 @@ export const INCOME_TYPES: { value: IncomeType; label: string }[] = [
   { value: "other", label: "Other" },
 ];
 
+export type Currency = "EUR" | "GBP";
+
+export const CURRENCIES: { value: Currency; label: string }[] = [
+  { value: "EUR", label: "EUR (€)" },
+  { value: "GBP", label: "GBP (£)" },
+];
+
 export type LivingProfile = {
   id: string;
   name: string;
@@ -172,9 +218,21 @@ export type LivingProfile = {
   is_baseline: boolean;
 };
 
+/** The household-level shell — a scenario holds one or more SeveranceScenarioPackages,
+ *  one per person taking severance in it, each on its own timeline. */
 export type SeveranceScenario = {
   id: string;
   name: string;
+  starting_balance: number;
+  notes: string | null;
+};
+
+/** One person's severance package within a scenario — salary/multiplier/notice-period/
+ *  garden-leave inputs and their own severance_start_date. A scenario can have several,
+ *  each running independently (e.g. both partners taking severance on different dates). */
+export type SeveranceScenarioPackage = {
+  id: string;
+  scenario_id: string;
   household_member_id: string;
   employer_name: string | null;
   years_of_service: number | null;
@@ -190,9 +248,7 @@ export type SeveranceScenario = {
   include_garden_leave: boolean;
   notice_period_months: number | null;
   gross_severance_override: number | null;
-  severance_start_date: string | null;
-  starting_balance: number;
-  notes: string | null;
+  severance_start_date: string;
 };
 
 export type ScenarioEventType = "one_off_outflow" | "one_off_inflow" | "recurring_income_start";
@@ -216,6 +272,16 @@ export type SeveranceScenarioPhase = {
   profile_id: string;
   start_date: string;
   label: string | null;
+};
+
+/** Scenario-scoped override: ends a property (and everything linked to it)
+ *  from a date, without touching the property or its commitments outside
+ *  this scenario. */
+export type SeveranceScenarioPropertyEnd = {
+  id: string;
+  scenario_id: string;
+  property_id: string;
+  end_date: string;
 };
 
 export const SCENARIO_EVENT_TYPES: { value: ScenarioEventType; label: string }[] = [

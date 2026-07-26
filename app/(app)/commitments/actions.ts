@@ -30,6 +30,7 @@ const CommitmentSchema = z
     essential: z.boolean(),
     start_date: z.string().min(1, { message: "Start date is required." }),
     end_date: z.string().optional(),
+    property_id: z.string().optional(),
   })
   .refine(
     (data) => !data.end_date || data.end_date >= data.start_date,
@@ -91,6 +92,7 @@ function parseCommitmentForm(formData: FormData) {
     essential: formData.get("essential") === "on",
     start_date: formData.get("start_date"),
     end_date: formData.get("end_date") || undefined,
+    property_id: formData.get("property_id") || undefined,
   });
 }
 
@@ -127,6 +129,7 @@ export async function createCommitment(
       user_id: user.id,
       profile_id: profileId,
       end_date: validated.data.frequency === "one_off" ? null : validated.data.end_date || null,
+      property_id: validated.data.property_id || null,
     })
     .select("id")
     .single();
@@ -167,6 +170,7 @@ export async function updateCommitment(
     .update({
       ...validated.data,
       end_date: validated.data.frequency === "one_off" ? null : validated.data.end_date || null,
+      property_id: validated.data.property_id || null,
     })
     .eq("id", id);
 

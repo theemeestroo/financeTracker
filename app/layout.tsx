@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Financial Runway Tracker",
+  title: "Runaway",
   description: "Household commitments, income, and severance runway planning.",
 };
 

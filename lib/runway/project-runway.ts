@@ -1,5 +1,5 @@
 import { toMonthlyEquivalent } from "@/lib/finance/frequency";
-import { incomeGrossBreakdown, incomeNetBreakdown } from "@/lib/finance/income-gross";
+import { incomeBreakdownPerSplit } from "@/lib/finance/income-gross";
 import { isActiveOn, firstOfMonth, addMonths } from "@/lib/finance/date-utils";
 import { calculateNetIncome } from "@/lib/tax";
 import type { TaxProfile } from "@/lib/types";
@@ -16,62 +16,77 @@ function activeProfileFor(date: string, phases: RunwayPhase[]): RunwayPhase {
   return active;
 }
 
-/** Net monthly cash flow (income − commitments) for one profile on one month. */
-function monthlyNetCashFlow(
+/** That month's commitment spend for one profile — recurring-equivalent plus any one-off landing this month. */
+function monthlyCommitmentsCost(phase: RunwayPhase, date: string): number {
+  let cost = 0;
+  for (const c of phase.profile.commitments) {
+    if (c.frequency === "one_off") {
+      if (firstOfMonth(c.start_date) === date) cost += c.amount;
+      continue;
+    }
+    if (isActiveOn(c.start_date, c.end_date, date)) {
+      cost += toMonthlyEquivalent(c.amount, c.frequency);
+    }
+  }
+  return cost;
+}
+
+/** That month's net income for one profile, per split share. */
+function monthlyIncomeNet(
   phase: RunwayPhase,
   date: string,
   taxProfileByMember: Map<string, TaxProfile>,
   year: number
 ): number {
   let net = 0;
-
-  for (const c of phase.profile.commitments) {
-    if (c.frequency === "one_off") {
-      if (firstOfMonth(c.start_date) === date) net -= c.amount;
-      continue;
-    }
-    if (isActiveOn(c.start_date, c.end_date, date)) {
-      net -= toMonthlyEquivalent(c.amount, c.frequency);
-    }
-  }
-
   for (const i of phase.profile.income) {
     if (!isActiveOn(i.start_date, i.end_date, date)) continue;
-    const taxProfile = taxProfileByMember.get(i.household_member_id);
     // Recurring-only, same as the dashboard: a one-time annual bonus isn't
     // timed to a specific month in this data model, so it's deliberately
     // excluded from the month-by-month projection rather than guessed at.
-    net += taxProfile
-      ? incomeNetBreakdown(i, taxProfile, year).recurringMonthlyNet
-      : incomeGrossBreakdown(i).recurringMonthlyGross; // no tax profile yet — gross fallback, same as the dashboard's documented gap
+    for (const share of incomeBreakdownPerSplit(i, i.splits, taxProfileByMember, year)) {
+      // No tax profile yet (or unattributed, zero-split income) — gross
+      // fallback, same as the dashboard's documented gap. Unlike the
+      // dashboard's totals, the runway never silently drops real cash flow.
+      net += share.net ? share.net.recurringMonthlyNet : share.gross.recurringMonthlyGross;
+    }
   }
-
   return net;
 }
 
 /**
  * Month-by-month balance projection for a severance scenario (DESIGN §7).
  *
- * Walks forward from `severanceStartDate`: garden leave (if any) contributes
- * net monthly salary on top of ordinary cash flow for `noticePeriodMonths`;
- * once it ends, the net severance lump sum lands. Every month, whichever
+ * Walks forward from the earliest severance stream's start date. Each stream
+ * (one per person taking severance) contributes garden-leave pay for its own
+ * notice window, then its own net severance lump sum when that ends —
+ * streams run independently and simply sum together. Every month, whichever
  * phase's `startDate` is the most recent one at or before that month
  * supplies the active commitments/income — a wholesale profile swap, not an
  * incremental diff. One-off commitments and scenario events land in their
  * own occurrence month only.
  */
 export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult {
-  if (scenario.phases.length === 0) {
+  if (scenario.phases.length === 0 || scenario.severances.length === 0) {
     return { series: [], depletionDate: null, lowestBalance: 0, lowestBalanceDate: null };
   }
 
   const horizon = scenario.horizonMonths ?? DEFAULT_HORIZON_MONTHS;
-  const startMonth = firstOfMonth(scenario.severanceStartDate);
-  const gardenLeaveEndMonth = scenario.includeGardenLeave
-    ? addMonths(startMonth, Math.round(scenario.noticePeriodMonths))
-    : startMonth;
+  const startMonth = firstOfMonth(
+    scenario.severances.reduce(
+      (earliest, s) => (s.severanceStartDate < earliest ? s.severanceStartDate : earliest),
+      scenario.severances[0].severanceStartDate
+    )
+  );
+  const streams = scenario.severances.map((s) => ({
+    ...s,
+    startMonth: firstOfMonth(s.severanceStartDate),
+    gardenLeaveEndMonth: s.includeGardenLeave
+      ? addMonths(firstOfMonth(s.severanceStartDate), Math.round(s.noticePeriodMonths))
+      : firstOfMonth(s.severanceStartDate),
+  }));
 
-  let balance = 0;
+  let balance = scenario.startingBalance;
   const series: RunwayPoint[] = [];
   let depletionDate: string | null = null;
   let lowestBalance = Infinity;
@@ -88,13 +103,18 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
     const date = addMonths(startMonth, m);
     const phase = activeProfileFor(date, scenario.phases);
 
-    let monthDelta = monthlyNetCashFlow(phase, date, scenario.taxProfileByMember, scenario.taxYear);
+    const monthlyCost = monthlyCommitmentsCost(phase, date);
+    let monthDelta =
+      monthlyIncomeNet(phase, date, scenario.taxProfileByMember, scenario.taxYear) - monthlyCost;
 
-    if (scenario.includeGardenLeave && date < gardenLeaveEndMonth) {
-      monthDelta += scenario.gardenLeaveNetMonthly;
-    }
-    if (date === gardenLeaveEndMonth) {
-      monthDelta += scenario.netSeveranceLumpSum;
+    for (const stream of streams) {
+      if (date < stream.startMonth) continue;
+      if (stream.includeGardenLeave && date < stream.gardenLeaveEndMonth) {
+        monthDelta += stream.gardenLeaveNetMonthly;
+      }
+      if (date === stream.gardenLeaveEndMonth) {
+        monthDelta += stream.netSeveranceLumpSum;
+      }
     }
 
     for (const event of scenario.events) {
@@ -121,7 +141,7 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
     }
 
     balance += monthDelta;
-    series.push({ date, balance });
+    series.push({ date, balance, monthlyCost });
 
     if (depletionDate === null && balance < 0) {
       depletionDate = date;

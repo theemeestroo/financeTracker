@@ -98,6 +98,9 @@
      commitment/income row whose end_date falls within the next 60 days).
      Never used as chrome or repurposed as a 5th categorical hue. */
   --status-warning: #a15c00;
+  /* Amber accent — flags a commitment marked discretionary (non-essential).
+     Distinct token from --status-warning so the two meanings never collide. */
+  --status-discretionary: #b8860b;
   /* Categorical series colors — for telling distinct entities apart (e.g.
      scenarios in a comparison chart). Never reused for single-series charts,
      which stay on the monochrome --chart-* tokens above. First 4 slots of
@@ -144,6 +147,7 @@
   --status-good: #0ca30c;
   --status-critical: #d03b3b;
   --status-warning: #e0a640;
+  --status-discretionary: #d4a017;
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;

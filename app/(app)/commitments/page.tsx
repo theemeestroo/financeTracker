@@ -8,19 +8,20 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
-  TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { DeleteButton } from "@/components/delete-button";
-import { toMonthlyEquivalent, formatEUR } from "@/lib/finance/frequency";
+import { CollapsibleTableGroup } from "@/components/collapsible-table-group";
+import { toMonthlyEquivalent, formatEUR, sortCommitmentsByCost } from "@/lib/finance/frequency";
 import { getBaselineProfileId } from "@/lib/finance/baseline-profile";
 import { memberShareOfAmount, splitLabel } from "@/lib/finance/splits";
 import { todayISO } from "@/lib/finance/dashboard";
+import { formatDateDisplay } from "@/lib/finance/date-utils";
 import { COMMITMENT_CATEGORIES, COMMITMENT_FREQUENCIES } from "@/lib/types";
-import type { Commitment, CommitmentSplit, HouseholdMember } from "@/lib/types";
+import type { Commitment, CommitmentSplit, HouseholdMember, Property } from "@/lib/types";
 
 const categoryLabel = (v: string) =>
   COMMITMENT_CATEGORIES.find((c) => c.value === v)?.label ?? v;
@@ -40,7 +41,7 @@ function commitmentStatus(c: Commitment, onDate: string): { label: string; dotCl
   if (daysUntil <= ENDING_SOON_DAYS) {
     return { label: "Ending soon", dotClassName: "bg-[var(--status-warning)]" };
   }
-  return { label: `Ends ${c.end_date}`, dotClassName: "bg-foreground/30" };
+  return { label: `Ends ${formatDateDisplay(c.end_date)}`, dotClassName: "bg-foreground/30" };
 }
 
 export default async function CommitmentsPage({
@@ -54,17 +55,19 @@ export default async function CommitmentsPage({
 
   let query = supabase
     .from("commitments")
-    .select("id, profile_id, name, category, amount, frequency, essential, start_date, end_date")
+    .select(
+      "id, profile_id, name, category, amount, frequency, essential, start_date, end_date, property_id"
+    )
     .eq("profile_id", baselineProfileId)
     .order("name");
 
   if (category) query = query.eq("category", category);
 
-  const [{ data: commitments }, { data: members }] = await Promise.all([
+  const [{ data: commitments }, { data: members }, { data: properties }] = await Promise.all([
     query,
     supabase.from("household_members").select("id, name, created_at"),
+    supabase.from("properties").select("id, profile_id, name, address, notes, end_date"),
   ]);
-
   let rows = (commitments ?? []) as Commitment[];
   const memberById = new Map(
     ((members ?? []) as HouseholdMember[]).map((m) => [m.id, m.name])
@@ -85,19 +88,51 @@ export default async function CommitmentsPage({
 
   if (owner === "household") {
     rows = rows.filter((c) => (splitsByCommitment.get(c.id) ?? []).length === 0);
+  } else if (owner === "non-household") {
+    rows = rows.filter((c) => (splitsByCommitment.get(c.id) ?? []).length > 0);
   } else if (owner) {
     rows = rows.filter((c) =>
       (splitsByCommitment.get(c.id) ?? []).some((s) => s.household_member_id === owner)
     );
   }
 
+  // Only an actual person filter prorates to their share — "household" and
+  // "non-household" are aggregate views, not one person's slice.
+  const isMemberFilter = !!owner && memberById.has(owner);
+
   const totalMonthly = rows.reduce((sum, c) => {
     const monthly = toMonthlyEquivalent(c.amount, c.frequency);
     const splits = splitsByCommitment.get(c.id) ?? [];
-    return sum + (owner && owner !== "household" ? memberShareOfAmount(monthly, splits, owner) : monthly);
+    return sum + (isMemberFilter ? memberShareOfAmount(monthly, splits, owner!) : monthly);
   }, 0);
 
   const onDate = todayISO();
+
+  // Grouped by property (alphabetical), then a final "No property" group —
+  // costs within each group ordered biggest-first, same as everywhere else.
+  const commitmentsByProperty = new Map<string, Commitment[]>();
+  const unassigned: Commitment[] = [];
+  for (const c of rows) {
+    if (c.property_id) {
+      commitmentsByProperty.set(c.property_id, [
+        ...(commitmentsByProperty.get(c.property_id) ?? []),
+        c,
+      ]);
+    } else {
+      unassigned.push(c);
+    }
+  }
+  const groups = [
+    ...((properties ?? []) as Property[])
+      .filter((p) => commitmentsByProperty.has(p.id))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((p) => ({
+        key: p.id,
+        label: p.name,
+        commitments: sortCommitmentsByCost(commitmentsByProperty.get(p.id)!),
+      })),
+    { key: "none", label: "No property", commitments: sortCommitmentsByCost(unassigned) },
+  ].filter((g) => g.commitments.length > 0);
 
   return (
     <div className="flex flex-col gap-6">
@@ -125,7 +160,7 @@ export default async function CommitmentsPage({
           <CardHeader>
             <CardTitle className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
               Total monthly-equivalent
-              {owner && owner !== "household" ? ` — ${memberById.get(owner) ?? ""}'s share` : ""}
+              {isMemberFilter ? ` — ${memberById.get(owner!) ?? ""}'s share` : ""}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -174,62 +209,78 @@ export default async function CommitmentsPage({
                   </TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
-                {rows.map((c) => {
-                  const splits = splitsByCommitment.get(c.id) ?? [];
-                  const monthly = toMonthlyEquivalent(c.amount, c.frequency);
-                  const isProrated = owner && owner !== "household";
-                  const displayMonthly = isProrated
-                    ? memberShareOfAmount(monthly, splits, owner)
-                    : monthly;
-                  const status = commitmentStatus(c, onDate);
-                  return (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          {c.name}
-                          {!c.essential && (
-                            <Badge variant="outline" className="text-xs font-normal">
-                              Discretionary
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>{categoryLabel(c.category)}</TableCell>
-                      <TableCell>{splitLabel(splits, memberById)}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatEUR(c.amount)}
-                      </TableCell>
-                      <TableCell>{frequencyLabel(c.frequency)}</TableCell>
-                      <TableCell>
-                        <span className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
-                          <span className={`size-1.5 shrink-0 rounded-full ${status.dotClassName}`} aria-hidden />
-                          {status.label}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatEUR(displayMonthly)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label="Edit"
-                            render={<Link href={`/commitments/${c.id}/edit`} />}
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
-                          <DeleteButton
-                            action={deleteCommitment.bind(null, c.id)}
-                            confirmMessage={`Delete "${c.name}"?`}
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
+              {groups.map((group) => {
+                const groupMonthly = group.commitments.reduce(
+                  (sum, c) => sum + toMonthlyEquivalent(c.amount, c.frequency),
+                  0
+                );
+                return (
+                  <CollapsibleTableGroup
+                    key={group.key}
+                    label={group.label}
+                    href={group.key === "none" ? undefined : `/properties/${group.key}`}
+                    total={formatEUR(groupMonthly)}
+                    colSpan={6}
+                  >
+                    {group.commitments.map((c) => {
+                      const splits = splitsByCommitment.get(c.id) ?? [];
+                      const monthly = toMonthlyEquivalent(c.amount, c.frequency);
+                      const displayMonthly = isMemberFilter
+                        ? memberShareOfAmount(monthly, splits, owner!)
+                        : monthly;
+                      const status = commitmentStatus(c, onDate);
+                      return (
+                        <TableRow key={c.id}>
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              {c.name}
+                              {!c.essential && (
+                                <Badge
+                                  variant="outline"
+                                  className="border-[var(--status-discretionary)]/30 bg-[var(--status-discretionary)]/10 text-[var(--status-discretionary)] text-xs font-normal"
+                                >
+                                  Discretionary
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>{categoryLabel(c.category)}</TableCell>
+                          <TableCell>{splitLabel(splits, memberById)}</TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatEUR(c.amount)}
+                          </TableCell>
+                          <TableCell>{frequencyLabel(c.frequency)}</TableCell>
+                          <TableCell>
+                            <span className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
+                              <span className={`size-1.5 shrink-0 rounded-full ${status.dotClassName}`} aria-hidden />
+                              {status.label}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatEUR(displayMonthly)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label="Edit"
+                                render={<Link href={`/commitments/${c.id}/edit`} />}
+                              >
+                                <Pencil className="size-4" />
+                              </Button>
+                              <DeleteButton
+                                action={deleteCommitment.bind(null, c.id)}
+                                confirmMessage={`Delete "${c.name}"?`}
+                              />
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </CollapsibleTableGroup>
+                );
+              })}
             </Table>
           )}
         </CardContent>

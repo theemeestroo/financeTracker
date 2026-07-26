@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SurplusTile } from "@/components/charts/surplus-tile";
 import { CategoryBreakdownChart } from "@/components/charts/category-breakdown-chart";
@@ -16,10 +17,17 @@ import {
 } from "@/lib/finance/dashboard";
 import { computeHistoricalTrend, trendMonthsAvailable } from "@/lib/finance/trend";
 import { getCurrentTaxYear } from "@/lib/tax";
-import { getBaselineProfileId } from "@/lib/finance/baseline-profile";
+import { getBaselineProfile } from "@/lib/finance/baseline-profile";
 import { toMonthlyEquivalent } from "@/lib/finance/frequency";
-import { memberShareOfAmount } from "@/lib/finance/splits";
-import type { Commitment, CommitmentSplit, HouseholdMember, Income, TaxProfile } from "@/lib/types";
+import { memberShareOfAmount, type Split } from "@/lib/finance/splits";
+import type {
+  Commitment,
+  CommitmentSplit,
+  HouseholdMember,
+  Income,
+  IncomeSplit,
+  TaxProfile,
+} from "@/lib/types";
 
 export default async function OverviewPage({
   searchParams,
@@ -29,7 +37,8 @@ export default async function OverviewPage({
   const { owner } = await searchParams;
   const supabase = await createClient();
   const onDate = todayISO();
-  const baselineProfileId = await getBaselineProfileId(supabase);
+  const baselineProfile = await getBaselineProfile(supabase);
+  const baselineProfileId = baselineProfile.id;
 
   const [{ data: commitments }, { data: income }, { data: members }, { data: taxProfiles }] =
     await Promise.all([
@@ -42,7 +51,7 @@ export default async function OverviewPage({
       supabase
         .from("income")
         .select(
-          "id, profile_id, household_member_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost"
+          "id, profile_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, currency, exchange_rate_to_eur"
         )
         .eq("profile_id", baselineProfileId),
       supabase.from("household_members").select("id, name, created_at"),
@@ -72,11 +81,25 @@ export default async function OverviewPage({
     ]);
   }
 
+  const { data: incomeSplitRows } = await supabase
+    .from("income_splits")
+    .select("id, income_id, household_member_id, percentage")
+    .in("income_id", allIncome.map((i) => i.id));
+  const splitsByIncome = new Map<string, Split[]>();
+  for (const s of (incomeSplitRows ?? []) as IncomeSplit[]) {
+    splitsByIncome.set(s.income_id, [...(splitsByIncome.get(s.income_id) ?? []), s]);
+  }
+
   if (allCommitments.length === 0 && allIncome.length === 0) {
     return (
       <div className="flex flex-col gap-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
+            <Link href="/profiles">
+              <Badge variant="outline">Baseline: {baselineProfile.name}</Badge>
+            </Link>
+          </div>
           <p className="text-sm text-muted-foreground">
             Add your commitments and income to see the household&apos;s monthly picture.
           </p>
@@ -109,6 +132,7 @@ export default async function OverviewPage({
   const year = getCurrentTaxYear();
   const { netMonthly: monthlyNetIncome, missingProfileCount } = totalMonthlyNetIncome(
     activeInc,
+    splitsByIncome,
     taxProfileByMember,
     year
   );
@@ -138,13 +162,18 @@ export default async function OverviewPage({
   const trendMonths = trendMonthsAvailable(allCommitments, allIncome);
   const trend =
     trendMonths >= 2
-      ? computeHistoricalTrend(allCommitments, allIncome, taxProfileByMember, year, trendMonths)
+      ? computeHistoricalTrend(allCommitments, allIncome, splitsByIncome, taxProfileByMember, year, trendMonths)
       : null;
 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
+          <Link href="/profiles">
+            <Badge variant="outline">Baseline: {baselineProfile.name}</Badge>
+          </Link>
+        </div>
         <p className="text-sm text-muted-foreground">
           Income shown net of tax ({year} rates); commitments are already cash outflows.
         </p>
@@ -160,8 +189,9 @@ export default async function OverviewPage({
 
       {missingProfileCount > 0 && (
         <p className="text-sm text-muted-foreground">
-          {missingProfileCount} income {missingProfileCount === 1 ? "source has" : "sources have"} no
-          tax profile yet, so it&apos;s excluded from the net total above.{" "}
+          {missingProfileCount} income {missingProfileCount === 1 ? "share isn't" : "shares aren't"}{" "}
+          linked to a taxed person yet, so {missingProfileCount === 1 ? "it's" : "they're"} excluded
+          from the net total above.{" "}
           <Link href="/household" className="underline underline-offset-2">
             Set up tax profiles
           </Link>

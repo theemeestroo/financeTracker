@@ -8,6 +8,9 @@ import {
   Wallet,
   Users,
   TrendingDown,
+  Home,
+  Layers,
+  PlaneTakeoff,
   LogOut,
   Menu,
 } from "lucide-react";
@@ -26,8 +29,10 @@ import { logout } from "@/lib/actions/auth";
 const NAV_ITEMS = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/commitments", label: "Commitments", icon: Receipt },
+  { href: "/properties", label: "Properties", icon: Home },
   { href: "/income", label: "Income", icon: Wallet },
   { href: "/household", label: "Household", icon: Users },
+  { href: "/profiles", label: "Living Profiles", icon: Layers },
   { href: "/severance-scenarios", label: "Severance Scenarios", icon: TrendingDown },
 ];
 
@@ -47,10 +52,10 @@ function initialsFromEmail(email: string) {
 function Logo() {
   return (
     <Link href="/" className="flex items-center gap-2.5">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-sm font-bold text-primary-foreground">
-        FR
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+        <PlaneTakeoff className="size-4.5" />
       </span>
-      <span className="text-base font-semibold tracking-tight">Runway</span>
+      <span className="text-base font-semibold tracking-tight">Runaway</span>
     </Link>
   );
 }

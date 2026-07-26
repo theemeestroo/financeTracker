@@ -1,5 +1,6 @@
 import { activeCommitments, activeIncome, totalMonthlyCommitments, totalMonthlyNetIncome } from "./dashboard";
 import { firstOfMonth, addMonths } from "./date-utils";
+import type { Split } from "./splits";
 import type { Commitment, Income, TaxProfile } from "@/lib/types";
 
 export type TrendPoint = { date: string; balance: number };
@@ -36,6 +37,7 @@ export function trendMonthsAvailable(commitments: Commitment[], income: Income[]
 export function computeHistoricalTrend(
   commitments: Commitment[],
   income: Income[],
+  splitsByIncome: Map<string, Split[]>,
   taxProfileByMember: Map<string, TaxProfile>,
   taxYear: number,
   months: number
@@ -48,6 +50,7 @@ export function computeHistoricalTrend(
     const monthlyCommitments = totalMonthlyCommitments(activeCommitments(commitments, date));
     const { netMonthly } = totalMonthlyNetIncome(
       activeIncome(income, date),
+      splitsByIncome,
       taxProfileByMember,
       taxYear
     );

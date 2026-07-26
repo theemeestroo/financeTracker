@@ -3,15 +3,19 @@
 import { useActionState, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import {
+  CURRENCIES,
   INCOME_BONUS_DISTRIBUTIONS,
   INCOME_FREQUENCIES,
   INCOME_TYPES,
+  type Currency,
   type HouseholdMember,
   type Income,
+  type IncomeSplit,
   type IncomeType,
 } from "@/lib/types";
 import type { FormState } from "./actions";
@@ -20,17 +24,38 @@ export function IncomeForm({
   action,
   members,
   defaultValues,
+  defaultSplits,
   profileId,
   redirectTo,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   members: HouseholdMember[];
   defaultValues?: Partial<Income>;
+  defaultSplits?: IncomeSplit[];
   profileId?: string;
   redirectTo?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
   const [type, setType] = useState<IncomeType>(defaultValues?.type ?? "salary");
+  const [currency, setCurrency] = useState<Currency>(defaultValues?.currency ?? "EUR");
+  const [checkedIds, setCheckedIds] = useState<string[]>(
+    defaultSplits?.map((s) => s.household_member_id) ?? []
+  );
+  const [percentages, setPercentages] = useState<Record<string, number>>(() =>
+    Object.fromEntries((defaultSplits ?? []).map((s) => [s.household_member_id, s.percentage]))
+  );
+
+  function toggleMember(id: string) {
+    setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  function splitEvenly() {
+    const share = Math.round((100 / checkedIds.length) * 100) / 100;
+    setPercentages(Object.fromEntries(checkedIds.map((id) => [id, share])));
+  }
+
+  const total = checkedIds.reduce((sum, id) => sum + (percentages[id] ?? 0), 0);
+  const showPercentages = checkedIds.length > 1;
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
@@ -41,28 +66,85 @@ export function IncomeForm({
         <Input id="name" name="name" defaultValue={defaultValues?.name} required />
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="household_member_id">Household member</Label>
-        <NativeSelect
-          id="household_member_id"
-          name="household_member_id"
-          defaultValue={defaultValues?.household_member_id ?? ""}
-          required
-        >
-          <option value="" disabled>
-            Select a member
-          </option>
-          {members.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name}
-            </option>
-          ))}
-        </NativeSelect>
+      <div className="flex flex-col gap-2 rounded-lg border p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Who receives this income?
+          </span>
+          {showPercentages && (
+            <button
+              type="button"
+              onClick={splitEvenly}
+              className="text-xs underline underline-offset-2 text-muted-foreground hover:text-foreground"
+            >
+              Split evenly
+            </button>
+          )}
+        </div>
+
+        {members.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No household members yet — this will be a general household income.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {members.map((m) => {
+              const checked = checkedIds.includes(m.id);
+              return (
+                <div key={m.id} className="flex items-center gap-3">
+                  <label className="flex flex-1 items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleMember(m.id)}
+                      className="size-4 rounded border-input accent-foreground"
+                    />
+                    {m.name}
+                  </label>
+                  {checked && showPercentages && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        name={`splits[${m.id}]`}
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        value={percentages[m.id] ?? 0}
+                        onChange={(e) =>
+                          setPercentages((prev) => ({ ...prev, [m.id]: Number(e.target.value) }))
+                        }
+                        className="h-8 w-20 rounded-lg border border-input bg-transparent px-2 text-sm text-right"
+                      />
+                      <span className="text-sm text-muted-foreground">%</span>
+                    </div>
+                  )}
+                  {checked && !showPercentages && (
+                    <input type="hidden" name={`splits[${m.id}]`} value={100} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {showPercentages && (
+          <p
+            className="text-xs"
+            style={{ color: total === 100 ? "var(--muted-foreground)" : "var(--status-critical)" }}
+          >
+            Total: {total}% {total !== 100 && "— must add up to 100%"}
+          </p>
+        )}
+        {checkedIds.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            Not linked to anyone — counted as a general household income.
+          </p>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="gross_amount">Gross amount (EUR)</Label>
+          <Label htmlFor="gross_amount">Gross amount</Label>
           <Input
             id="gross_amount"
             name="gross_amount"
@@ -72,6 +154,21 @@ export function IncomeForm({
             defaultValue={defaultValues?.gross_amount}
             required
           />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="currency">Currency</Label>
+          <NativeSelect
+            id="currency"
+            name="currency"
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value as Currency)}
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
+          </NativeSelect>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="frequency">Frequency</Label>
@@ -88,6 +185,25 @@ export function IncomeForm({
           </NativeSelect>
         </div>
       </div>
+
+      {currency !== "EUR" && (
+        <div className="flex flex-col gap-1.5 max-w-64">
+          <Label htmlFor="exchange_rate_to_eur">Exchange rate (1 {currency} = ? EUR)</Label>
+          <Input
+            id="exchange_rate_to_eur"
+            name="exchange_rate_to_eur"
+            type="number"
+            step="0.0001"
+            min="0"
+            defaultValue={defaultValues?.exchange_rate_to_eur ?? 1}
+            required
+          />
+          <span className="text-xs text-muted-foreground">
+            Entered manually — update periodically as rates move. Everything (gross, net, tax) is
+            calculated in EUR using this rate, not the raw {currency} amount.
+          </span>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="type">Type</Label>
@@ -228,24 +344,38 @@ export function IncomeForm({
         </div>
       )}
 
+      {type === "rental" && (
+        <div className="rounded-lg border p-4">
+          <div className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Rental overhead
+          </div>
+          <div className="flex flex-col gap-1.5 max-w-56">
+            <Label htmlFor="rental_overhead_pct">Overhead, % of rent</Label>
+            <Input
+              id="rental_overhead_pct"
+              name="rental_overhead_pct"
+              type="number"
+              step="1"
+              min="0"
+              max="100"
+              defaultValue={defaultValues?.rental_overhead_pct ?? 20}
+            />
+            <span className="text-xs text-muted-foreground">
+              Reserved for vacancy, maintenance, etc. The adjusted amount — not the raw rent — is
+              what counts toward gross/net income and gets taxed.
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="start_date">Start date (optional)</Label>
-          <Input
-            id="start_date"
-            name="start_date"
-            type="date"
-            defaultValue={defaultValues?.start_date ?? undefined}
-          />
+          <DatePicker id="start_date" name="start_date" defaultValue={defaultValues?.start_date} />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="end_date">End date (optional)</Label>
-          <Input
-            id="end_date"
-            name="end_date"
-            type="date"
-            defaultValue={defaultValues?.end_date ?? undefined}
-          />
+          <DatePicker id="end_date" name="end_date" defaultValue={defaultValues?.end_date} />
         </div>
       </div>
 

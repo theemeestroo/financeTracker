@@ -1,22 +1,24 @@
-import type { CommitmentSplit } from "@/lib/types";
+/** Structural shape shared by CommitmentSplit and PropertySplit — these
+ *  helpers work for either without duplicating the split math. */
+export type Split = { household_member_id: string; percentage: number };
 
-/** The fraction (0–1) of a commitment attributable to one household member. */
-export function shareForMember(splits: CommitmentSplit[], memberId: string): number {
+/** The fraction (0–1) of a commitment (or property) attributable to one household member. */
+export function shareForMember(splits: Split[], memberId: string): number {
   const split = splits.find((s) => s.household_member_id === memberId);
   return split ? split.percentage / 100 : 0;
 }
 
-/** A commitment's amount, scaled down to one member's share of it. */
+/** An amount, scaled down to one member's share of it. */
 export function memberShareOfAmount(
   amount: number,
-  splits: CommitmentSplit[],
+  splits: Split[],
   memberId: string
 ): number {
   return amount * shareForMember(splits, memberId);
 }
 
 export function splitLabel(
-  splits: CommitmentSplit[],
+  splits: Split[],
   memberById: Map<string, string>
 ): string {
   if (splits.length === 0) return "Household";

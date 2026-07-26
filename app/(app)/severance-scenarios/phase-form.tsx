@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -41,7 +42,7 @@ export function PhaseForm({
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="phase_start_date">Active from</Label>
-          <Input id="phase_start_date" name="start_date" type="date" required />
+          <DatePicker id="phase_start_date" name="start_date" />
         </div>
       </div>
       <div className="flex flex-col gap-1.5">

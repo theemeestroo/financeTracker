@@ -11,6 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { formatEUR } from "@/lib/finance/frequency";
+import { formatMonthDisplay } from "@/lib/finance/date-utils";
 
 export type ComparisonSeries = {
   id: string;
@@ -32,7 +33,9 @@ function ChartTooltip({
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-2xl border border-border bg-popover px-3.5 py-2.5 text-sm shadow-sm">
-      <div className="mb-1.5 font-medium text-popover-foreground">{label}</div>
+      <div className="mb-1.5 font-medium text-popover-foreground">
+        {label ? formatMonthDisplay(label) : label}
+      </div>
       <div className="flex flex-col gap-1">
         {payload.map((entry) => {
           const s = series.find((x) => x.id === entry.dataKey);
@@ -89,7 +92,7 @@ export function ComparisonChart({
           <CartesianGrid vertical={false} stroke="var(--border)" />
           <XAxis
             dataKey="date"
-            tickFormatter={(d: string) => d.slice(0, 7)}
+            tickFormatter={(d: string) => formatMonthDisplay(d)}
             tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
             axisLine={false}
             tickLine={false}

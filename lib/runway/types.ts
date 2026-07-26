@@ -1,8 +1,13 @@
+import type { Split } from "@/lib/finance/splits";
 import type { Commitment, Frequency, Income, TaxProfile } from "@/lib/types";
+
+/** An income row with its splits embedded — travels together instead of a
+ *  second lookup map, since every consumer needs both at once. */
+export type ResolvedIncome = Income & { splits: Split[] };
 
 export type ResolvedRunwayProfile = {
   commitments: Commitment[];
-  income: Income[];
+  income: ResolvedIncome[];
 };
 
 export type RunwayPhase = {
@@ -20,13 +25,24 @@ export type RunwayEvent = {
   recurringEndDate: string | null;
 };
 
-export type ResolvedSeveranceScenario = {
+/** One person's severance cash flow within a scenario — garden-leave pay
+ *  (if any) for its own notice window, then its own net severance lump sum,
+ *  all on its own timeline. A scenario sums one or more of these. */
+export type SeveranceStream = {
+  householdMemberId: string;
   severanceStartDate: string;
   includeGardenLeave: boolean;
   noticePeriodMonths: number;
   gardenLeaveNetMonthly: number;
-  /** Net severance (after tax) + any additional buffer — applied as a lump sum once garden leave ends. */
+  /** Net severance (after tax) only — the scenario's starting balance is applied separately. */
   netSeveranceLumpSum: number;
+};
+
+export type ResolvedSeveranceScenario = {
+  /** Seeds the balance at month 0 (household savings/buffer, not tied to any one person's severance). */
+  startingBalance: number;
+  /** Always at least one. The projection starts at the earliest stream's severanceStartDate. */
+  severances: SeveranceStream[];
   /** Sorted ascending by startDate; always at least one (the baseline phase). */
   phases: RunwayPhase[];
   events: RunwayEvent[];
@@ -39,6 +55,10 @@ export type ResolvedSeveranceScenario = {
 export type RunwayPoint = {
   date: string;
   balance: number;
+  /** That month's recurring + one-off commitment spend (not net cash flow) —
+   *  optional so callers plotting a plain {date,balance} series (e.g. the
+   *  dashboard's historical trend) don't need to supply it. */
+  monthlyCost?: number;
 };
 
 export type RunwayResult = {

@@ -86,7 +86,7 @@ export async function cloneLivingProfile(
     supabase
       .from("income")
       .select(
-        "household_member_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost"
+        "id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, currency, exchange_rate_to_eur"
       )
       .eq("profile_id", sourceProfileId),
   ]);
@@ -132,9 +132,54 @@ export async function cloneLivingProfile(
     }
   }
   if (income && income.length > 0) {
-    await supabase.from("income").insert(
-      income.map((i) => ({ ...i, user_id: user.id, profile_id: newProfile.id }))
-    );
+    const { data: clonedIncome } = await supabase
+      .from("income")
+      .insert(
+        income.map((i) => ({
+          name: i.name,
+          gross_amount: i.gross_amount,
+          type: i.type,
+          frequency: i.frequency,
+          start_date: i.start_date,
+          end_date: i.end_date,
+          tax_profile_id: i.tax_profile_id,
+          christmas_bonus_pct: i.christmas_bonus_pct,
+          holiday_pay_pct: i.holiday_pay_pct,
+          annual_bonus: i.annual_bonus,
+          bonus_distribution: i.bonus_distribution,
+          annual_car_allowance: i.annual_car_allowance,
+          monthly_pension_contribution: i.monthly_pension_contribution,
+          monthly_company_car_cost: i.monthly_company_car_cost,
+          rental_overhead_pct: i.rental_overhead_pct,
+          currency: i.currency,
+          exchange_rate_to_eur: i.exchange_rate_to_eur,
+          user_id: user.id,
+          profile_id: newProfile.id,
+        }))
+      )
+      .select("id");
+
+    if (clonedIncome) {
+      const { data: incomeSplits } = await supabase
+        .from("income_splits")
+        .select("income_id, household_member_id, percentage")
+        .in("income_id", income.map((i) => i.id));
+
+      if (incomeSplits && incomeSplits.length > 0) {
+        const oldToNewIncomeId = new Map(income.map((i, idx) => [i.id, clonedIncome[idx]?.id]));
+        const newIncomeSplits = incomeSplits
+          .filter((s) => oldToNewIncomeId.get(s.income_id))
+          .map((s) => ({
+            user_id: user.id,
+            income_id: oldToNewIncomeId.get(s.income_id)!,
+            household_member_id: s.household_member_id,
+            percentage: s.percentage,
+          }));
+        if (newIncomeSplits.length > 0) {
+          await supabase.from("income_splits").insert(newIncomeSplits);
+        }
+      }
+    }
   }
 
   revalidatePath("/", "layout");

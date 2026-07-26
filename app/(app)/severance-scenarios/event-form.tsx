@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -44,7 +45,7 @@ export function EventForm({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="event_start_date">Start date</Label>
-            <Input id="event_start_date" name="date" type="date" required />
+            <DatePicker id="event_start_date" name="date" />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="recurring_gross_amount">Gross amount</Label>
@@ -69,14 +70,14 @@ export function EventForm({
           </div>
           <div className="col-span-3 flex flex-col gap-1.5">
             <Label htmlFor="recurring_end_date">End date (optional)</Label>
-            <Input id="recurring_end_date" name="recurring_end_date" type="date" />
+            <DatePicker id="recurring_end_date" name="recurring_end_date" />
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="event_date">Date</Label>
-            <Input id="event_date" name="date" type="date" required />
+            <DatePicker id="event_date" name="date" />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="amount">Amount</Label>

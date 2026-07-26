@@ -1,7 +1,7 @@
-import type { SeveranceScenario } from "@/lib/types";
+import type { SeveranceScenarioPackage } from "@/lib/types";
 
 export type SeverancePackageInput = Pick<
-  SeveranceScenario,
+  SeveranceScenarioPackage,
   | "monthly_base_salary"
   | "annual_bonus"
   | "annual_car_benefit"

@@ -1,3 +1,5 @@
+import type { Commitment, Currency } from "@/lib/types";
+
 export type Frequency = "monthly" | "quarterly" | "annual" | "one_off";
 
 // One-off amounts aren't part of the ongoing monthly burn rate — they're
@@ -16,10 +18,26 @@ export function toMonthlyEquivalent(amount: number, frequency: Frequency): numbe
   }
 }
 
-export function formatEUR(amount: number): string {
+/** The shared ordering for every "costs" list in the app — largest
+ *  monthly-equivalent cost first. */
+export function sortCommitmentsByCost<T extends Pick<Commitment, "amount" | "frequency">>(
+  commitments: T[]
+): T[] {
+  return [...commitments].sort(
+    (a, b) => toMonthlyEquivalent(b.amount, b.frequency) - toMonthlyEquivalent(a.amount, a.frequency)
+  );
+}
+
+/** Every total/aggregate in the app is EUR — this is only for showing an
+ *  income row's amount back in the currency it was actually entered in. */
+export function formatCurrency(amount: number, currency: Currency): string {
   return new Intl.NumberFormat("de-DE", {
     style: "currency",
-    currency: "EUR",
+    currency,
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+export function formatEUR(amount: number): string {
+  return formatCurrency(amount, "EUR");
 }
