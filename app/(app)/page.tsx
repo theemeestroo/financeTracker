@@ -20,13 +20,14 @@ import { getCurrentTaxYear } from "@/lib/tax";
 import { getBaselineProfile } from "@/lib/finance/baseline-profile";
 import { toMonthlyEquivalent } from "@/lib/finance/frequency";
 import { memberShareOfAmount, type Split } from "@/lib/finance/splits";
+import { toTaxProfile } from "@/lib/finance/tax-profile-context";
 import type {
   Commitment,
   CommitmentSplit,
   HouseholdMember,
   Income,
   IncomeSplit,
-  TaxProfile,
+  TaxProfileRow,
 } from "@/lib/types";
 
 export default async function OverviewPage({
@@ -54,19 +55,25 @@ export default async function OverviewPage({
           "id, profile_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, currency, exchange_rate_to_eur"
         )
         .eq("profile_id", baselineProfileId),
-      supabase.from("household_members").select("id, name, created_at"),
+      supabase
+        .from("household_members")
+        .select(
+          "id, name, created_at, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium"
+        ),
       supabase
         .from("tax_profiles")
-        .select(
-          "id, household_member_id, tax_class, church_tax, church_tax_state, has_children, statutory_health_insurance, health_insurance_addon_rate"
-        ),
+        .select("id, household_member_id, tax_class, church_tax, church_tax_state, has_children"),
     ]);
 
   const allCommitments = (commitments ?? []) as Commitment[];
   const allIncome = (income ?? []) as Income[];
   const householdMembers = (members ?? []) as HouseholdMember[];
+  const memberById = new Map(householdMembers.map((m) => [m.id, m]));
   const taxProfileByMember = new Map(
-    ((taxProfiles ?? []) as TaxProfile[]).map((p) => [p.household_member_id, p])
+    ((taxProfiles ?? []) as TaxProfileRow[]).map((row) => [
+      row.household_member_id,
+      toTaxProfile(row, memberById.get(row.household_member_id)),
+    ])
   );
 
   const { data: splitRows } = await supabase

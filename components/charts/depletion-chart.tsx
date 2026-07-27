@@ -4,6 +4,7 @@ import {
   Area,
   Bar,
   CartesianGrid,
+  Cell,
   ComposedChart,
   ReferenceDot,
   ReferenceLine,
@@ -45,9 +46,15 @@ function ChartTooltip({
 export function DepletionChart({
   series,
   depletionDate,
+  selectedDate,
+  onSelectMonth,
 }: {
   series: RunwayPoint[];
   depletionDate: string | null;
+  /** The month currently shown in an external breakdown panel, if any — highlights its column. */
+  selectedDate?: string | null;
+  /** Fired with a point's date when its column/area is clicked. */
+  onSelectMonth?: (date: string) => void;
 }) {
   const depletionPoint = depletionDate ? series.find((p) => p.date === depletionDate) : undefined;
   const showCost = series.some((p) => p.monthlyCost != null);
@@ -55,7 +62,15 @@ export function DepletionChart({
 
   return (
     <ResponsiveContainer width="100%" height={280}>
-      <ComposedChart data={series} margin={{ top: 8, right: 16, bottom: 0, left: 8 }}>
+      <ComposedChart
+        data={series}
+        margin={{ top: 8, right: 16, bottom: 0, left: 8 }}
+        className={onSelectMonth ? "cursor-pointer" : undefined}
+        onClick={(state) => {
+          const label = state?.activeLabel;
+          if (onSelectMonth && typeof label === "string") onSelectMonth(label);
+        }}
+      >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--chart-5)" stopOpacity={0.22} />
@@ -92,16 +107,31 @@ export function DepletionChart({
           />
         )}
         <ReferenceLine yAxisId="balance" y={0} stroke="var(--muted-foreground)" strokeWidth={1} />
-        <Tooltip content={<ChartTooltip />} />
+        {selectedDate && (
+          <ReferenceLine
+            yAxisId="balance"
+            x={selectedDate}
+            stroke="var(--foreground)"
+            strokeDasharray="3 3"
+            strokeWidth={1}
+          />
+        )}
+        <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--muted)", opacity: 0.35 }} />
         {showCost && (
           <Bar
             yAxisId="cost"
             dataKey="monthlyCost"
-            fill="var(--chart-3)"
             radius={[3, 3, 0, 0]}
             maxBarSize={10}
             isAnimationActive={false}
-          />
+          >
+            {series.map((point) => (
+              <Cell
+                key={point.date}
+                fill={point.date === selectedDate ? "var(--chart-5)" : "var(--chart-3)"}
+              />
+            ))}
+          </Bar>
         )}
         <Area
           yAxisId="balance"

@@ -21,7 +21,9 @@ export default async function HouseholdPage() {
   const [{ data: members }, { data: taxProfiles }] = await Promise.all([
     supabase
       .from("household_members")
-      .select("id, name, created_at")
+      .select(
+        "id, name, created_at, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium"
+      )
       .order("created_at", { ascending: true }),
     supabase.from("tax_profiles").select("household_member_id, tax_class"),
   ]);
@@ -67,6 +69,7 @@ export default async function HouseholdPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead scope="col">Name</TableHead>
+                  <TableHead scope="col">Health insurance</TableHead>
                   <TableHead scope="col">Tax profile</TableHead>
                   <TableHead scope="col" className="w-24 text-right">
                     Actions
@@ -79,6 +82,15 @@ export default async function HouseholdPage() {
                   return (
                     <TableRow key={member.id}>
                       <TableCell className="font-medium">{member.name}</TableCell>
+                      <TableCell>
+                        <Link
+                          href={`/household/${member.id}/edit`}
+                          className="flex w-fit items-center gap-1.5 text-sm hover:underline"
+                        >
+                          <span className="size-1.5 shrink-0 rounded-full bg-foreground/30" aria-hidden />
+                          {member.statutory_health_insurance ? "Public (GKV)" : "Private (PKV)"}
+                        </Link>
+                      </TableCell>
                       <TableCell>
                         {taxClass ? (
                           <Link

@@ -41,6 +41,7 @@ const profileClass1: TaxProfile = {
   has_children: false,
   statutory_health_insurance: true,
   health_insurance_addon_rate: null,
+  private_health_insurance_monthly_premium: null,
 };
 
 const profileClass3: TaxProfile = {

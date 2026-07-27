@@ -29,7 +29,8 @@ import { getBaselineProfileId } from "@/lib/finance/baseline-profile";
 import { todayISO } from "@/lib/finance/dashboard";
 import { formatDateDisplay } from "@/lib/finance/date-utils";
 import { INCOME_FREQUENCIES, INCOME_TYPES } from "@/lib/types";
-import type { HouseholdMember, Income, IncomeSplit, TaxProfile } from "@/lib/types";
+import { toTaxProfile } from "@/lib/finance/tax-profile-context";
+import type { HouseholdMember, Income, IncomeSplit, TaxProfileRow } from "@/lib/types";
 
 const typeLabel = (v: string) => INCOME_TYPES.find((t) => t.value === v)?.label ?? v;
 const frequencyLabel = (v: string) =>
@@ -90,20 +91,25 @@ export default async function IncomePage() {
       )
       .eq("profile_id", baselineProfileId)
       .order("name"),
-    supabase.from("household_members").select("id, name, created_at"),
+    supabase
+      .from("household_members")
+      .select(
+        "id, name, created_at, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium"
+      ),
     supabase
       .from("tax_profiles")
-      .select(
-        "id, household_member_id, tax_class, church_tax, church_tax_state, has_children, statutory_health_insurance, health_insurance_addon_rate"
-      ),
+      .select("id, household_member_id, tax_class, church_tax, church_tax_state, has_children"),
   ]);
 
   const rows = (income ?? []) as Income[];
-  const memberById = new Map(
-    ((members ?? []) as HouseholdMember[]).map((m) => [m.id, m.name])
-  );
+  const householdMembers = (members ?? []) as HouseholdMember[];
+  const memberById = new Map(householdMembers.map((m) => [m.id, m.name]));
+  const memberRecordById = new Map(householdMembers.map((m) => [m.id, m]));
   const taxProfileByMember = new Map(
-    ((taxProfiles ?? []) as TaxProfile[]).map((p) => [p.household_member_id, p])
+    ((taxProfiles ?? []) as TaxProfileRow[]).map((row) => [
+      row.household_member_id,
+      toTaxProfile(row, memberRecordById.get(row.household_member_id)),
+    ])
   );
 
   const { data: splitRows } = await supabase

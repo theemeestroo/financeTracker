@@ -12,7 +12,9 @@ export default async function EditHouseholdMemberPage({
   const supabase = await createClient();
   const { data: member } = await supabase
     .from("household_members")
-    .select("id, name")
+    .select(
+      "id, name, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium"
+    )
     .eq("id", id)
     .single();
 
@@ -26,6 +28,8 @@ export default async function EditHouseholdMemberPage({
       <HouseholdMemberForm
         action={updateHouseholdMember.bind(null, id)}
         defaultName={member.name}
+        defaultDateOfBirth={member.date_of_birth}
+        defaultValues={member}
       />
     </div>
   );

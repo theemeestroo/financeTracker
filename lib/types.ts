@@ -2,6 +2,10 @@ export type HouseholdMember = {
   id: string;
   name: string;
   created_at: string;
+  date_of_birth: string | null;
+  statutory_health_insurance: boolean;
+  health_insurance_addon_rate: number | null;
+  private_health_insurance_monthly_premium: number | null;
 };
 
 export type CommitmentCategory =
@@ -67,16 +71,26 @@ export type CommitmentSplit = {
   percentage: number;
 };
 
-export type TaxProfile = {
+/** The literal `tax_profiles` table shape — Steuerklasse/filing setup only.
+ *  Health-insurance fields live on `HouseholdMember` instead (always
+ *  present, no tax profile required) — see `TaxProfile` below. */
+export type TaxProfileRow = {
   id: string;
   household_member_id: string;
   tax_class: 1 | 2 | 3 | 4 | 5 | 6;
   church_tax: boolean;
   church_tax_state: string | null;
   has_children: boolean;
-  statutory_health_insurance: boolean;
-  health_insurance_addon_rate: number | null;
 };
+
+/** The calc-ready shape every `lib/tax`/`lib/finance`/`lib/runway` consumer
+ *  uses — a `TaxProfileRow` merged with its household member's
+ *  health-insurance fields (see `lib/finance/tax-profile-context.ts`). */
+export type TaxProfile = TaxProfileRow &
+  Pick<
+    HouseholdMember,
+    "statutory_health_insurance" | "health_insurance_addon_rate" | "private_health_insurance_monthly_premium"
+  >;
 
 export const TAX_CLASSES: { value: 1 | 2 | 3 | 4 | 5 | 6; label: string }[] = [
   { value: 1, label: "I — single" },
@@ -249,6 +263,16 @@ export type SeveranceScenarioPackage = {
   notice_period_months: number | null;
   gross_severance_override: number | null;
   severance_start_date: string;
+  christmas_bonus_pct: number | null;
+  include_christmas_bonus_in_calc: boolean;
+  claim_unemployment_benefit: boolean;
+  unemployment_benefit_defer_months: number;
+  months_insured_override: number | null;
+  new_job_start_date: string | null;
+  /** User-confirmed override: the exit agreement's wording avoids a Sperrzeit,
+   *  so ALG I is modeled starting right after garden leave/notice ends
+   *  instead of being shifted by the heuristic 12-week risk flag. */
+  sperrzeit_safe_confirmed: boolean;
 };
 
 export type ScenarioEventType = "one_off_outflow" | "one_off_inflow" | "recurring_income_start";
@@ -282,6 +306,18 @@ export type SeveranceScenarioPropertyEnd = {
   scenario_id: string;
   property_id: string;
   end_date: string;
+};
+
+/** Redundancy admin checklist item — template_key null for a custom
+ *  (user-added) item, set for one seeded from the static template. */
+export type ScenarioChecklistItem = {
+  id: string;
+  scenario_id: string;
+  template_key: string | null;
+  label: string;
+  due_date: string | null;
+  completed: boolean;
+  completed_at: string | null;
 };
 
 export const SCENARIO_EVENT_TYPES: { value: ScenarioEventType; label: string }[] = [

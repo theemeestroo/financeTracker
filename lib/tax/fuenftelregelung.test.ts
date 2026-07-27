@@ -11,6 +11,7 @@ const profile: TaxProfile = {
   has_children: true,
   statutory_health_insurance: true,
   health_insurance_addon_rate: null,
+  private_health_insurance_monthly_premium: null,
 };
 
 describe("calculateSeveranceNet — Fünftelregelung", () => {

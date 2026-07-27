@@ -3,10 +3,9 @@
 import { useActionState, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
-import { GERMAN_STATES, TAX_CLASSES, type TaxProfile } from "@/lib/types";
+import { GERMAN_STATES, TAX_CLASSES, type TaxProfileRow } from "@/lib/types";
 import type { FormState } from "./tax-profile-actions";
 
 export function TaxProfileForm({
@@ -14,11 +13,10 @@ export function TaxProfileForm({
   defaultValues,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
-  defaultValues?: Partial<TaxProfile>;
+  defaultValues?: Partial<TaxProfileRow>;
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
   const [churchTax, setChurchTax] = useState(defaultValues?.church_tax ?? false);
-  const [statutory, setStatutory] = useState(defaultValues?.statutory_health_insurance ?? true);
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
@@ -83,41 +81,6 @@ export function TaxProfileForm({
           Has children (exempts from the childless Pflegeversicherung surcharge)
         </Label>
       </div>
-
-      <div className="flex items-center gap-2">
-        <input
-          id="statutory_health_insurance"
-          name="statutory_health_insurance"
-          type="checkbox"
-          checked={statutory}
-          onChange={(e) => setStatutory(e.target.checked)}
-          className="size-4 rounded border-input accent-foreground"
-        />
-        <Label htmlFor="statutory_health_insurance" className="font-normal">
-          Statutory health insurance (gesetzlich versichert)
-        </Label>
-      </div>
-
-      {statutory && (
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="health_insurance_addon_rate">
-            Zusatzbeitrag override, % (optional)
-          </Label>
-          <Input
-            id="health_insurance_addon_rate"
-            name="health_insurance_addon_rate"
-            type="number"
-            step="0.01"
-            min="0"
-            defaultValue={
-              defaultValues?.health_insurance_addon_rate != null
-                ? defaultValues.health_insurance_addon_rate * 100
-                : undefined
-            }
-            placeholder="Leave blank to use the average"
-          />
-        </div>
-      )}
 
       {state?.error && (
         <p role="alert" className="text-sm text-destructive">

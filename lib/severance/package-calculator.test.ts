@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateSeverancePackage } from "./package-calculator";
+import { calculateSeverancePackage, statutoryFloor } from "./package-calculator";
 
 // Cross-checked against the severance-scenarios.jsx mock's worked example:
 // monthlySalary 10,480, 19 years service, 1.75× multiplier, bonus included,
@@ -16,6 +16,8 @@ describe("calculateSeverancePackage", () => {
     include_garden_leave: true,
     notice_period_months: 6,
     gross_severance_override: null,
+    christmas_bonus_pct: null,
+    include_christmas_bonus_in_calc: false,
   };
 
   it("matches the mock's worked example", () => {
@@ -47,5 +49,32 @@ describe("calculateSeverancePackage", () => {
   it("no garden leave means no notice pay", () => {
     const result = calculateSeverancePackage({ ...base, include_garden_leave: false });
     expect(result.noticePay).toBe(0);
+  });
+
+  it("folds christmas bonus % into the calc base when included", () => {
+    const withXmas = calculateSeverancePackage({
+      ...base,
+      christmas_bonus_pct: 100,
+      include_christmas_bonus_in_calc: true,
+    });
+    const without = calculateSeverancePackage(base);
+    // 100% of monthly_base_salary (10480) added to the calc base
+    expect(withXmas.monthlyBaseForCalc).toBeCloseTo(without.monthlyBaseForCalc + 10480, 2);
+  });
+
+  it("leaves the calc base unchanged when christmas bonus is not included", () => {
+    const result = calculateSeverancePackage({ ...base, christmas_bonus_pct: 100 });
+    expect(result.monthlyBaseForCalc).toBeCloseTo(11480, 2);
+  });
+});
+
+describe("statutoryFloor", () => {
+  it("computes 0.5 months' pay × years of service", () => {
+    // 0.5 * 10480 * 19 = 99560
+    expect(statutoryFloor(10480, 19)).toBeCloseTo(99560, 2);
+  });
+
+  it("is zero with no service", () => {
+    expect(statutoryFloor(10480, 0)).toBe(0);
   });
 });

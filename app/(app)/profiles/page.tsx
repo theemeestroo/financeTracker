@@ -8,7 +8,8 @@ import { incomeGrossBreakdown } from "@/lib/finance/income-gross";
 import { totalMonthlyNetIncome } from "@/lib/finance/dashboard";
 import { getCurrentTaxYear } from "@/lib/tax";
 import type { Split } from "@/lib/finance/splits";
-import type { Commitment, Income, IncomeSplit, LivingProfile, TaxProfile } from "@/lib/types";
+import { toTaxProfile } from "@/lib/finance/tax-profile-context";
+import type { Commitment, HouseholdMember, Income, IncomeSplit, LivingProfile, TaxProfileRow } from "@/lib/types";
 import { deleteLivingProfile } from "./actions";
 import { NewProfileForm } from "./new-profile-form";
 
@@ -22,25 +23,29 @@ export default async function ProfilesPage() {
 
   const rows = (profiles ?? []) as LivingProfile[];
 
-  const [{ data: commitments }, { data: income }, { data: taxProfiles }] = await Promise.all([
-    supabase
-      .from("commitments")
-      .select(
-        "id, profile_id, name, category, amount, frequency, essential, start_date, end_date, property_id"
-      )
-      .in("profile_id", rows.map((p) => p.id)),
-    supabase
-      .from("income")
-      .select(
-        "id, profile_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, currency, exchange_rate_to_eur"
-      )
-      .in("profile_id", rows.map((p) => p.id)),
-    supabase
-      .from("tax_profiles")
-      .select(
-        "id, household_member_id, tax_class, church_tax, church_tax_state, has_children, statutory_health_insurance, health_insurance_addon_rate"
-      ),
-  ]);
+  const [{ data: commitments }, { data: income }, { data: taxProfiles }, { data: members }] =
+    await Promise.all([
+      supabase
+        .from("commitments")
+        .select(
+          "id, profile_id, name, category, amount, frequency, essential, start_date, end_date, property_id"
+        )
+        .in("profile_id", rows.map((p) => p.id)),
+      supabase
+        .from("income")
+        .select(
+          "id, profile_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, currency, exchange_rate_to_eur"
+        )
+        .in("profile_id", rows.map((p) => p.id)),
+      supabase
+        .from("tax_profiles")
+        .select("id, household_member_id, tax_class, church_tax, church_tax_state, has_children"),
+      supabase
+        .from("household_members")
+        .select(
+          "id, name, created_at, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium"
+        ),
+    ]);
 
   const commitmentsByProfile = new Map<string, Commitment[]>();
   for (const c of (commitments ?? []) as Commitment[]) {
@@ -51,8 +56,12 @@ export default async function ProfilesPage() {
   for (const i of incomeRows) {
     incomeByProfile.set(i.profile_id, [...(incomeByProfile.get(i.profile_id) ?? []), i]);
   }
+  const memberById = new Map(((members ?? []) as HouseholdMember[]).map((m) => [m.id, m]));
   const taxProfileByMember = new Map(
-    ((taxProfiles ?? []) as TaxProfile[]).map((p) => [p.household_member_id, p])
+    ((taxProfiles ?? []) as TaxProfileRow[]).map((row) => [
+      row.household_member_id,
+      toTaxProfile(row, memberById.get(row.household_member_id)),
+    ])
   );
   const taxYear = getCurrentTaxYear();
 

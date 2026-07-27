@@ -6,6 +6,8 @@ export type {
   RunwayPhase,
   RunwayEvent,
   RunwayPoint,
+  RunwayLineItem,
+  RunwayMonthBreakdown,
   RunwayResult,
   SeveranceStream,
 } from "./types";

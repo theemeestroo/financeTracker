@@ -16,6 +16,7 @@ export type RunwayPhase = {
 };
 
 export type RunwayEvent = {
+  name: string;
   date: string;
   eventType: "one_off_outflow" | "one_off_inflow" | "recurring_income_start";
   amount: number | null;
@@ -27,15 +28,30 @@ export type RunwayEvent = {
 
 /** One person's severance cash flow within a scenario — garden-leave pay
  *  (if any) for its own notice window, then its own net severance lump sum,
- *  all on its own timeline. A scenario sums one or more of these. */
+ *  then (optionally) ALG I income and a post-severance health-insurance
+ *  cost, all on its own timeline. A scenario sums one or more of these. */
 export type SeveranceStream = {
   householdMemberId: string;
+  /** Display-only — used to label this stream's line items in a month breakdown. */
+  householdMemberName: string;
   severanceStartDate: string;
   includeGardenLeave: boolean;
   noticePeriodMonths: number;
   gardenLeaveNetMonthly: number;
   /** Net severance (after tax) only — the scenario's starting balance is applied separately. */
   netSeveranceLumpSum: number;
+  /** ALG I monthly net amount; 0 when not eligible/not claiming. */
+  algMonthlyNet: number;
+  /** Natural claim start (garden-leave end, or severance start) plus any deferral. Ignored when algMonthlyNet is 0. */
+  algStartDate: string;
+  /** algStartDate plus the eligible duration. Ignored when algMonthlyNet is 0. */
+  algEndDate: string;
+  /** Re-employment date, if known — truncates ALG I income and the health-insurance gap/ALG-I cost from this date on. */
+  newJobStartDate: string | null;
+  /** Monthly health-insurance cost during a self-funded gap (before ALG I starts, or if not claiming). */
+  healthGapMonthly: number;
+  /** Monthly health-insurance cost while on ALG I. */
+  healthAlgMonthly: number;
 };
 
 export type ResolvedSeveranceScenario = {
@@ -52,6 +68,19 @@ export type ResolvedSeveranceScenario = {
   horizonMonths?: number;
 };
 
+export type RunwayLineItem = {
+  label: string;
+  /** Always a positive magnitude — which bucket (inflows/outflows) it's in carries the sign. */
+  amount: number;
+};
+
+/** Every cash-flow line making up one month's balance change, split by
+ *  direction so a UI can show a segmented bar plus an itemized list. */
+export type RunwayMonthBreakdown = {
+  inflows: RunwayLineItem[];
+  outflows: RunwayLineItem[];
+};
+
 export type RunwayPoint = {
   date: string;
   balance: number;
@@ -59,6 +88,9 @@ export type RunwayPoint = {
    *  optional so callers plotting a plain {date,balance} series (e.g. the
    *  dashboard's historical trend) don't need to supply it. */
   monthlyCost?: number;
+  /** Itemized income/outgoings behind that month's balance change. Optional
+   *  for the same reason as monthlyCost — plain {date,balance} callers skip it. */
+  breakdown?: RunwayMonthBreakdown;
 };
 
 export type RunwayResult = {

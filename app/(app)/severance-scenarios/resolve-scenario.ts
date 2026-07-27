@@ -3,21 +3,30 @@ import { getCurrentTaxYear, calculateSocialContributions, taxableWageIncome, cal
 import { calculateSeveranceNet } from "@/lib/tax/fuenftelregelung";
 import { calculateSeverancePackage } from "@/lib/severance";
 import {
+  alg1DurationMonths,
+  alg1MonthlyNet,
+  assessSperrzeitRisk,
+  monthlyHealthInsuranceCost,
+  SPERRZEIT_WEEKS,
+} from "@/lib/unemployment";
+import {
   activeCommitments,
   activeIncome,
   totalMonthlyCommitments,
   totalMonthlyNetIncome,
 } from "@/lib/finance/dashboard";
-import { addDays } from "@/lib/finance/date-utils";
+import { addDays, addMonths, ageInYears } from "@/lib/finance/date-utils";
 import type { Split } from "@/lib/finance/splits";
+import { toTaxProfile } from "@/lib/finance/tax-profile-context";
 import type { ResolvedIncome, ResolvedSeveranceScenario, SeveranceStream } from "@/lib/runway";
 import type {
   Commitment,
+  HouseholdMember,
   Income,
   IncomeSplit,
   SeveranceScenario,
   SeveranceScenarioPackage,
-  TaxProfile,
+  TaxProfileRow,
 } from "@/lib/types";
 
 /**
@@ -61,7 +70,30 @@ export type ScenarioPackageSummary = {
   taxSaving: number | null;
   gardenLeaveNetMonthly: number | null;
   hasTaxProfile: boolean;
+  /** Notice period's actual end (severance start + notice_period_months) —
+   *  when garden leave/the lump sum land, per lib/runway/project-runway.ts.
+   *  Distinct from algStartDate below, which is this plus any deferral/Sperrzeit. */
+  gardenLeaveEndDate: string;
+  // ALG I + post-severance health insurance (§2.1-2.2) — all 0/dates-equal
+  // when claim_unemployment_benefit is off or eligibility isn't met.
+  algDurationMonths: number;
+  algMonthlyNet: number;
+  algStartDate: string;
+  algEndDate: string;
+  healthGapMonthly: number;
+  healthAlgMonthly: number;
+  // Sperrzeit risk (§2.3) — atRisk shifts algStartDate/algEndDate below.
+  sperrzeitAtRisk: boolean;
+  sperrzeitReason: string | null;
+  /** True when the package's own sperrzeit_safe_confirmed flag bypassed the
+   *  risk heuristic — a user assertion, not something this app verified. */
+  sperrzeitOverridden: boolean;
 };
+
+// The runway engine steps month-by-month, so the legally-precise 12-week
+// Sperrzeit gets rounded to whole months here, same as notice_period_months/
+// unemployment_benefit_defer_months already are before feeding addMonths.
+const SPERRZEIT_MONTHS = Math.round((SPERRZEIT_WEEKS * 7) / 30);
 
 /**
  * Resolves everything a severance scenario needs, in one place: the package
@@ -80,7 +112,7 @@ export async function resolveScenario(
 }> {
   const taxYear = getCurrentTaxYear();
 
-  const [{ data: packageRows }, { data: phaseRows }, { data: eventRows }, { data: taxProfiles }] =
+  const [{ data: packageRows }, { data: phaseRows }, { data: eventRows }, { data: taxProfiles }, { data: memberRows }] =
     await Promise.all([
       supabase
         .from("severance_scenario_packages")
@@ -95,13 +127,18 @@ export async function resolveScenario(
       supabase.from("severance_scenario_events").select("*").eq("scenario_id", scenario.id),
       supabase
         .from("tax_profiles")
+        .select("id, household_member_id, tax_class, church_tax, church_tax_state, has_children"),
+      supabase
+        .from("household_members")
         .select(
-          "id, household_member_id, tax_class, church_tax, church_tax_state, has_children, statutory_health_insurance, health_insurance_addon_rate"
+          "id, name, created_at, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium"
         ),
     ]);
 
   const packages = (packageRows ?? []) as SeveranceScenarioPackage[];
-  const allTaxProfiles = (taxProfiles ?? []) as TaxProfile[];
+  const allTaxProfileRows = (taxProfiles ?? []) as TaxProfileRow[];
+  const memberById = new Map(((memberRows ?? []) as HouseholdMember[]).map((m) => [m.id, m]));
+  const allTaxProfiles = allTaxProfileRows.map((row) => toTaxProfile(row, memberById.get(row.household_member_id)));
   const taxProfileByMember = new Map(allTaxProfiles.map((p) => [p.household_member_id, p]));
   const taxProfileById = new Map(allTaxProfiles.map((p) => [p.id, p]));
 
@@ -145,6 +182,39 @@ export async function resolveScenario(
       }
     }
 
+    // ── ALG I eligibility/amount + post-severance health insurance ───────
+    const member = memberById.get(pkg.household_member_id);
+    const age = member?.date_of_birth ? ageInYears(member.date_of_birth, pkg.severance_start_date) : null;
+    const insuredMonths = pkg.months_insured_override ?? (pkg.years_of_service ?? 0) * 12;
+    const algDurationMonths = pkg.claim_unemployment_benefit
+      ? alg1DurationMonths(insuredMonths, age, taxYear)
+      : 0;
+    const algMonthlyNet =
+      algDurationMonths > 0
+        ? alg1MonthlyNet(pkg.monthly_base_salary ?? 0, memberTaxProfile?.has_children ?? false, taxYear)
+        : 0;
+
+    const sperrzeit = assessSperrzeitRisk(pkg, packageResult.severanceGross);
+
+    const naturalAlgStart = pkg.include_garden_leave
+      ? addMonths(pkg.severance_start_date, Math.round(pkg.notice_period_months ?? 0))
+      : pkg.severance_start_date;
+    const deferredAlgStart = addMonths(naturalAlgStart, Math.round(pkg.unemployment_benefit_defer_months));
+    // Sperrzeit shifts the claim start additively on top of any manual
+    // deferral (deliberately conservative — see DESIGN v2 §7 for why this
+    // likely overstates rather than understates the delay).
+    const algStartDate = sperrzeit.atRisk
+      ? addMonths(deferredAlgStart, SPERRZEIT_MONTHS)
+      : deferredAlgStart;
+    const algEndDate = algDurationMonths > 0 ? addMonths(algStartDate, algDurationMonths) : algStartDate;
+
+    const healthGapMonthly = memberTaxProfile
+      ? monthlyHealthInsuranceCost(memberTaxProfile, "gap", taxYear)
+      : 0;
+    const healthAlgMonthly = memberTaxProfile
+      ? monthlyHealthInsuranceCost(memberTaxProfile, "alg1", taxYear)
+      : 0;
+
     return {
       package: pkg,
       severanceGross: packageResult.severanceGross,
@@ -155,6 +225,16 @@ export async function resolveScenario(
       taxSaving,
       gardenLeaveNetMonthly,
       hasTaxProfile: !!memberTaxProfile,
+      gardenLeaveEndDate: naturalAlgStart,
+      algDurationMonths,
+      algMonthlyNet,
+      algStartDate,
+      algEndDate,
+      healthGapMonthly,
+      healthAlgMonthly,
+      sperrzeitAtRisk: sperrzeit.atRisk,
+      sperrzeitReason: sperrzeit.reason,
+      sperrzeitOverridden: sperrzeit.overridden,
     };
   });
 
@@ -250,11 +330,18 @@ export async function resolveScenario(
 
   const severances: SeveranceStream[] = packageSummaries.map((s) => ({
     householdMemberId: s.package.household_member_id,
+    householdMemberName: memberById.get(s.package.household_member_id)?.name ?? "—",
     severanceStartDate: s.package.severance_start_date,
     includeGardenLeave: s.package.include_garden_leave,
     noticePeriodMonths: s.package.notice_period_months ?? 0,
     gardenLeaveNetMonthly: s.gardenLeaveNetMonthly ?? s.package.monthly_base_salary ?? 0,
     netSeveranceLumpSum: s.netSeverance ?? s.severanceGross,
+    algMonthlyNet: s.algMonthlyNet,
+    algStartDate: s.algStartDate,
+    algEndDate: s.algEndDate,
+    newJobStartDate: s.package.new_job_start_date,
+    healthGapMonthly: s.healthGapMonthly,
+    healthAlgMonthly: s.healthAlgMonthly,
   }));
 
   const runwayScenario: ResolvedSeveranceScenario = {
@@ -268,6 +355,7 @@ export async function resolveScenario(
       },
     })),
     events: (eventRows ?? []).map((e) => ({
+      name: e.name,
       date: e.date,
       eventType: e.event_type,
       amount: e.amount,

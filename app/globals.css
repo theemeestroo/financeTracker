@@ -50,108 +50,75 @@
 }
 
 :root {
-  /* Page canvas — the outer grey behind the floating sidebar/content panels. */
-  --background: #e8e8ed;
-  --foreground: #0c0d0d;
-  /* White surface: sidebar card, Stripe-style metric/section cards, table rows. */
-  --card: #ffffff;
-  --card-foreground: #0c0d0d;
-  --popover: #ffffff;
-  --popover-foreground: #0c0d0d;
-  /* Ink — primary buttons, active nav pill, dark chart bars/fills. */
-  --primary: #0c0d0d;
-  --primary-foreground: #fafafa;
-  /* Off-white — nav tile backgrounds, secondary surfaces. */
-  --secondary: #fafafa;
-  --secondary-foreground: #0c0d0d;
-  --muted: #f0f0f2;
-  --muted-foreground: #6b6b70;
-  --accent: #fafafa;
-  --accent-foreground: #0c0d0d;
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: #e2e2e7;
-  --input: #e2e2e7;
-  --ring: #b8b8be;
-  /* Single-series monochrome ramp (category breakdown bars, depletion line) — light to ink. */
-  --chart-1: #e4e4e9;
-  --chart-2: #b3b3ba;
-  --chart-3: #7a7a82;
-  --chart-4: #45454b;
-  --chart-5: #0c0d0d;
+  /* Site-wide dark, vibrant theme (rolled out from the severance-scenario
+     flagship pilot — see git history for the light "warm-monochrome" theme
+     this replaced). Page canvas — the outer near-black navy behind the
+     floating sidebar/content panels. */
+  --background: #14131f;
+  --foreground: #f5f5f7;
+  /* Raised navy surface: cards, table rows, popovers. */
+  --card: #1e1d2e;
+  --card-foreground: #f5f5f7;
+  --popover: #211f33;
+  --popover-foreground: #f5f5f7;
+  /* Teal — primary buttons, active nav pill, and --status-good (deliberate
+     double duty: this app's single accent doubles as "positive/brand"). */
+  --primary: #0d9488;
+  --primary-foreground: #0b1210;
+  --secondary: #232236;
+  --secondary-foreground: #f5f5f7;
+  --muted: #232236;
+  --muted-foreground: #9c9ab8;
+  --accent: #262445;
+  --accent-foreground: #f5f5f7;
+  --destructive: #fb5b6b;
+  --border: #2b2a44;
+  --input: #2b2a44;
+  --ring: #0d9488;
+  /* Single-series monochrome-adjacent ramp (category breakdown bars,
+     depletion line) — muted navy to teal. */
+  --chart-1: #423f5c;
+  --chart-2: #5b577e;
+  --chart-3: #3b82f6;
+  --chart-4: #2ab0a0;
+  --chart-5: #0d9488;
   --radius: 1rem;
-  /* Repurposed as the floating sidebar card's surface (white). */
-  --sidebar: #ffffff;
-  --sidebar-foreground: #0c0d0d;
-  --sidebar-primary: #0c0d0d;
-  --sidebar-primary-foreground: #fafafa;
-  --sidebar-accent: #fafafa;
-  --sidebar-accent-foreground: #0c0d0d;
-  --sidebar-border: #e2e2e7;
-  --sidebar-ring: #b8b8be;
+  /* Floating sidebar card's surface — a shade darker than --card, same
+     "distinct but harmonious neutrals" relationship the light theme had
+     between its white sidebar and mint content panel. */
+  --sidebar: #1a1926;
+  --sidebar-foreground: #f5f5f7;
+  --sidebar-primary: #0d9488;
+  --sidebar-primary-foreground: #0b1210;
+  --sidebar-accent: #262445;
+  --sidebar-accent-foreground: #f5f5f7;
+  --sidebar-border: #2b2a44;
+  --sidebar-ring: #0d9488;
   /* Content panel tint — the main scrollable area's floating card. */
-  --content-panel: #ecf4ee;
-  /* Status colors for semantic data (surplus/deficit) — reserved, never used
-     for categorical series. Values from the dataviz skill's validated palette. */
-  --status-good: #006300;
-  --status-critical: #d03b3b;
+  --content-panel: #1e1d2e;
+  /* Status colors for semantic data (surplus/deficit, risk flags) —
+     reserved, never used for categorical series. Palette chosen and
+     validated with the dataviz skill (scripts/validate_palette.js): teal/
+     blue/pink/amber all clear the dark-mode categorical checks (OKLCH
+     lightness band, chroma floor, CVD adjacent-pair separation) at surface
+     #1e1d2e, and each clears WCAG text contrast on both the page (#14131f)
+     and card surface standalone. */
+  --status-good: #0d9488;
+  --status-critical: #fb5b6b;
   /* Amber tri-state accent — reserved for genuine "ending soon" data (a
      commitment/income row whose end_date falls within the next 60 days).
      Never used as chrome or repurposed as a 5th categorical hue. */
-  --status-warning: #a15c00;
+  --status-warning: #d97706;
   /* Amber accent — flags a commitment marked discretionary (non-essential).
      Distinct token from --status-warning so the two meanings never collide. */
-  --status-discretionary: #b8860b;
+  --status-discretionary: #d97706;
   /* Categorical series colors — for telling distinct entities apart (e.g.
      scenarios in a comparison chart). Never reused for single-series charts,
-     which stay on the monochrome --chart-* tokens above. First 4 slots of
-     the dataviz skill's validated 8-hue categorical theme. */
-  --series-1: #2a78d6;
-  --series-2: #eb6834;
-  --series-3: #1baf7a;
-  --series-4: #eda100;
-}
-
-.dark {
-  --background: #101112;
-  --foreground: #fafafa;
-  --card: #1c1c1f;
-  --card-foreground: #fafafa;
-  --popover: #1c1c1f;
-  --popover-foreground: #fafafa;
-  --primary: #fafafa;
-  --primary-foreground: #0c0d0d;
-  --secondary: #232326;
-  --secondary-foreground: #fafafa;
-  --muted: #212124;
-  --muted-foreground: #9a9aa0;
-  --accent: #232326;
-  --accent-foreground: #fafafa;
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: #6b6b70;
-  --chart-1: #3a3a3f;
-  --chart-2: #55555c;
-  --chart-3: #83838a;
-  --chart-4: #b3b3ba;
-  --chart-5: #fafafa;
-  --sidebar: #1c1c1f;
-  --sidebar-foreground: #fafafa;
-  --sidebar-primary: #fafafa;
-  --sidebar-primary-foreground: #0c0d0d;
-  --sidebar-accent: #232326;
-  --sidebar-accent-foreground: #fafafa;
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: #6b6b70;
-  --content-panel: #161c19;
-  --status-good: #0ca30c;
-  --status-critical: #d03b3b;
-  --status-warning: #e0a640;
-  --status-discretionary: #d4a017;
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #c98500;
+     which stay on the --chart-* tokens above. */
+  --series-1: #0d9488;
+  --series-2: #3b82f6;
+  --series-3: #ec4899;
+  --series-4: #d97706;
 }
 
 @layer base {

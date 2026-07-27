@@ -37,6 +37,15 @@ export function PackageForm({
     defaultValues?.include_garden_leave ?? false
   );
   const [useOverride, setUseOverride] = useState(defaultValues?.gross_severance_override != null);
+  const [includeChristmasBonus, setIncludeChristmasBonus] = useState(
+    defaultValues?.include_christmas_bonus_in_calc ?? false
+  );
+  const [claimUnemploymentBenefit, setClaimUnemploymentBenefit] = useState(
+    defaultValues?.claim_unemployment_benefit ?? true
+  );
+  const [sperrzeitSafeConfirmed, setSperrzeitSafeConfirmed] = useState(
+    defaultValues?.sperrzeit_safe_confirmed ?? false
+  );
 
   const activePreset = SEVERANCE_MULTIPLIER_PRESETS.find((p) => p.value === multiplier);
 
@@ -136,6 +145,17 @@ export function PackageForm({
             />
           </div>
           <div className="flex flex-col gap-1.5">
+            <Label htmlFor="christmas_bonus_pct">Christmas money, % of 1mo (optional)</Label>
+            <Input
+              id="christmas_bonus_pct"
+              name="christmas_bonus_pct"
+              type="number"
+              step="0.1"
+              min="0"
+              defaultValue={defaultValues?.christmas_bonus_pct ?? undefined}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="monthly_pension_contribution">BAV pension contribution (EUR/mo)</Label>
             <Input
               id="monthly_pension_contribution"
@@ -199,6 +219,16 @@ export function PackageForm({
                 className="size-4 rounded border-input accent-foreground"
               />
               Include garden leave
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="include_christmas_bonus_in_calc"
+                checked={includeChristmasBonus}
+                onChange={(e) => setIncludeChristmasBonus(e.target.checked)}
+                className="size-4 rounded border-input accent-foreground"
+              />
+              Include Christmas money
             </label>
           </div>
         </div>
@@ -286,6 +316,88 @@ export function PackageForm({
           name="severance_start_date"
           defaultValue={defaultValues?.severance_start_date}
         />
+      </div>
+
+      <div className="rounded-lg border p-4">
+        <div className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Unemployment benefit (ALG I)
+        </div>
+
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="claim_unemployment_benefit"
+            checked={claimUnemploymentBenefit}
+            onChange={(e) => setClaimUnemploymentBenefit(e.target.checked)}
+            className="size-4 rounded border-input accent-foreground"
+          />
+          Assume ALG I is claimed after garden leave/severance
+        </label>
+
+        {claimUnemploymentBenefit && (
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="unemployment_benefit_defer_months">Pause ALG I start by, months</Label>
+              <Input
+                id="unemployment_benefit_defer_months"
+                name="unemployment_benefit_defer_months"
+                type="number"
+                step="0.5"
+                min="0"
+                defaultValue={defaultValues?.unemployment_benefit_defer_months ?? 0}
+              />
+              <span className="text-xs text-muted-foreground">
+                E.g. self-funding a few months of travel before registering as job-seeking
+              </span>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="months_insured_override">Months insured, last 30 (optional)</Label>
+              <Input
+                id="months_insured_override"
+                name="months_insured_override"
+                type="number"
+                step="0.5"
+                min="0"
+                defaultValue={defaultValues?.months_insured_override ?? undefined}
+                placeholder="Defaults to years of service × 12"
+              />
+              <span className="text-xs text-muted-foreground">
+                Override if years of service at this employer doesn&apos;t reflect your full insured history
+              </span>
+            </div>
+            <div className="flex flex-col gap-1.5 sm:col-span-2 border-t pt-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="sperrzeit_safe_confirmed"
+                  checked={sperrzeitSafeConfirmed}
+                  onChange={(e) => setSperrzeitSafeConfirmed(e.target.checked)}
+                  className="size-4 rounded border-input accent-foreground"
+                />
+                Exit agreement wording confirmed to avoid a Sperrzeit
+              </label>
+              <span className="text-xs text-muted-foreground">
+                By default this app flags a possible 12-week ALG I delay (Sperrzeit) whenever the
+                severance exceeds the 0.5×salary/year safe-harbor formula. Check this only once
+                you&apos;ve actually confirmed — with your lawyer or the Agentur für Arbeit — that
+                this package&apos;s wording avoids it; it&apos;s your own assertion, not something
+                this app can verify.
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4 flex flex-col gap-1.5 max-w-64">
+          <Label htmlFor="new_job_start_date">Already know your return-to-work date? (optional)</Label>
+          <DatePicker
+            id="new_job_start_date"
+            name="new_job_start_date"
+            defaultValue={defaultValues?.new_job_start_date ?? undefined}
+          />
+          <span className="text-xs text-muted-foreground">
+            Stops ALG I income and health-insurance gap costing from this date
+          </span>
+        </div>
       </div>
 
       {state?.error && (

@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { TaxProfileForm } from "../../tax-profile-form";
 import { upsertTaxProfile } from "../../tax-profile-actions";
-import type { TaxProfile } from "@/lib/types";
+import type { TaxProfileRow } from "@/lib/types";
 
 export default async function TaxProfilePage({
   params,
@@ -16,9 +16,7 @@ export default async function TaxProfilePage({
     supabase.from("household_members").select("id, name").eq("id", id).single(),
     supabase
       .from("tax_profiles")
-      .select(
-        "id, household_member_id, tax_class, church_tax, church_tax_state, has_children, statutory_health_insurance, health_insurance_addon_rate"
-      )
+      .select("id, household_member_id, tax_class, church_tax, church_tax_state, has_children")
       .eq("household_member_id", id)
       .maybeSingle(),
   ]);
@@ -37,7 +35,7 @@ export default async function TaxProfilePage({
       </div>
       <TaxProfileForm
         action={upsertTaxProfile.bind(null, id)}
-        defaultValues={(taxProfile as TaxProfile | null) ?? undefined}
+        defaultValues={(taxProfile as TaxProfileRow | null) ?? undefined}
       />
     </div>
   );

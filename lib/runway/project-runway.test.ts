@@ -50,11 +50,18 @@ function income(overrides: Partial<Income> & { splits?: Split[] }): ResolvedInco
 function stream(overrides: Partial<SeveranceStream>): SeveranceStream {
   return {
     householdMemberId: "m1",
+    householdMemberName: "Member",
     severanceStartDate: "2026-01-01",
     includeGardenLeave: false,
     noticePeriodMonths: 0,
     gardenLeaveNetMonthly: 0,
     netSeveranceLumpSum: 0,
+    algMonthlyNet: 0,
+    algStartDate: "2026-01-01",
+    algEndDate: "2026-01-01",
+    newJobStartDate: null,
+    healthGapMonthly: 0,
+    healthAlgMonthly: 0,
     ...overrides,
   };
 }
@@ -96,6 +103,41 @@ describe("projectRunway — lump sum timing", () => {
     expect(result.series[1].balance).toBe(6000); // month 1: another month of garden leave pay
     expect(result.series[2].balance).toBe(16000); // month 2: garden leave ends, lump sum lands
     expect(result.series[3].balance).toBe(16000); // month 3: no further cash flow
+  });
+});
+
+describe("projectRunway — month breakdown", () => {
+  it("itemizes commitments, income, and garden-leave pay into signed inflow/outflow lines that sum to the month's delta", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      severances: [
+        stream({
+          householdMemberName: "Alex",
+          includeGardenLeave: true,
+          noticePeriodMonths: 2,
+          gardenLeaveNetMonthly: 3000,
+          netSeveranceLumpSum: 10000,
+        }),
+      ],
+      phases: [
+        {
+          startDate: "2026-01-01",
+          profile: { commitments: [commitment({ name: "Rent", amount: 1200 })], income: [] },
+        },
+      ],
+    });
+
+    const month0 = result.series[0];
+    expect(month0.breakdown?.inflows).toEqual([{ label: "Alex — garden leave (net)", amount: 3000 }]);
+    expect(month0.breakdown?.outflows).toEqual([{ label: "Rent", amount: 1200 }]);
+    expect(month0.balance).toBe(3000 - 1200);
+
+    // Month 2: garden leave ends, lump sum lands alongside it.
+    const month2 = result.series[2];
+    expect(month2.breakdown?.inflows).toContainEqual({
+      label: "Alex — severance lump sum (net)",
+      amount: 10000,
+    });
   });
 });
 
@@ -190,7 +232,7 @@ describe("projectRunway — scenario events", () => {
       ...baseScenario,
       severances: [stream({ netSeveranceLumpSum: 20000 })],
       events: [
-        { date: "2026-06-01", eventType: "one_off_outflow", amount: 5000, recurringGrossAmount: null, recurringFrequency: null, recurringTaxProfile: null, recurringEndDate: null },
+        { name: "Big bill", date: "2026-06-01", eventType: "one_off_outflow", amount: 5000, recurringGrossAmount: null, recurringFrequency: null, recurringTaxProfile: null, recurringEndDate: null },
       ],
     });
     expect(result.series[4].balance).toBe(20000);
@@ -206,6 +248,7 @@ describe("projectRunway — scenario events", () => {
       ],
       events: [
         {
+          name: "New freelance income",
           date: "2026-03-01",
           eventType: "recurring_income_start",
           amount: null,
@@ -220,6 +263,73 @@ describe("projectRunway — scenario events", () => {
     expect(result.series[1].balance).toBe(-2000);
     expect(result.series[2].balance).toBe(-1800);
     expect(result.series[3].balance).toBe(-1600);
+  });
+});
+
+describe("projectRunway — ALG I + post-severance health insurance", () => {
+  it("charges the gap health cost before ALG I starts, then switches to ALG I income + its own health cost", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      severances: [
+        stream({
+          netSeveranceLumpSum: 0,
+          algMonthlyNet: 2000,
+          algStartDate: "2026-03-01", // deferred 2 months past the (no-garden-leave) severance start
+          algEndDate: "2026-06-01",
+          healthGapMonthly: 300,
+          healthAlgMonthly: 50,
+        }),
+      ],
+      horizonMonths: 6,
+    });
+    // months 0-1 (Jan/Feb): self-funded gap, -300/mo
+    expect(result.series[0].balance).toBe(-300);
+    expect(result.series[1].balance).toBe(-600);
+    // months 2-4 (Mar-May): on ALG I, +2000 -50/mo
+    expect(result.series[2].balance).toBe(-600 + 1950);
+    expect(result.series[3].balance).toBe(-600 + 1950 * 2);
+    expect(result.series[4].balance).toBe(-600 + 1950 * 3);
+    // month 5 (Jun): ALG I exhausted, back to the self-funded gap cost
+    expect(result.series[5].balance).toBe(-600 + 1950 * 3 - 300);
+  });
+
+  it("stops ALG I income and health-insurance cost the moment a known re-employment date lands", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      severances: [
+        stream({
+          netSeveranceLumpSum: 0,
+          algMonthlyNet: 2000,
+          algStartDate: "2026-01-01",
+          algEndDate: "2026-06-01",
+          healthGapMonthly: 300,
+          healthAlgMonthly: 50,
+          newJobStartDate: "2026-03-01",
+        }),
+      ],
+      horizonMonths: 4,
+    });
+    expect(result.series[0].balance).toBe(1950); // Jan: on ALG I
+    expect(result.series[1].balance).toBe(3900); // Feb: on ALG I
+    expect(result.series[2].balance).toBe(3900); // Mar: re-employed, no more ALG I or health cost
+    expect(result.series[3].balance).toBe(3900);
+  });
+
+  it("charges only the gap health cost, indefinitely, when not claiming ALG I", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      severances: [
+        stream({
+          netSeveranceLumpSum: 0,
+          algMonthlyNet: 0, // not claiming — algStartDate === algEndDate from the fixture default
+          healthGapMonthly: 300,
+        }),
+      ],
+      horizonMonths: 3,
+    });
+    expect(result.series[0].balance).toBe(-300);
+    expect(result.series[1].balance).toBe(-600);
+    expect(result.series[2].balance).toBe(-900);
   });
 });
 

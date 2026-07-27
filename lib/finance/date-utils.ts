@@ -29,6 +29,15 @@ export function addDays(dateISO: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Whole years between a birth date and another date (floored, i.e. "age turned as of that date"). */
+export function ageInYears(birthDateISO: string, onDateISO: string): number {
+  const [by, bm, bd] = birthDateISO.split("-").map(Number);
+  const [oy, om, od] = onDateISO.split("-").map(Number);
+  let age = oy - by;
+  if (om < bm || (om === bm && od < bd)) age -= 1;
+  return age;
+}
+
 /** Display only — `YYYY-MM-DD` -> `DD/MM/YYYY`. Storage/wire format stays ISO. */
 export function formatDateDisplay(dateISO: string): string {
   const [y, m, d] = dateISO.split("-");
