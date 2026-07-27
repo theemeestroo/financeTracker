@@ -11,6 +11,7 @@ import {
   Home,
   Layers,
   PlaneTakeoff,
+  HelpCircle,
   LogOut,
   Menu,
 } from "lucide-react";
@@ -115,15 +116,26 @@ function SidebarBody({ pathname, userEmail, onNavigate }: { pathname: string; us
 
       <NavGrid pathname={pathname} onNavigate={onNavigate} />
 
-      <form action={logout} className="mt-auto">
-        <button
-          type="submit"
-          className="flex w-full items-center gap-2.5 rounded-full px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      <div className="mt-auto flex flex-col gap-1">
+        <Link
+          href="/help"
+          onClick={onNavigate}
+          aria-current={isItemActive(pathname, "/help") ? "page" : undefined}
+          className="flex items-center gap-2.5 rounded-full px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground aria-[current=page]:bg-muted aria-[current=page]:text-foreground"
         >
-          <LogOut className="size-4" />
-          Sign out
-        </button>
-      </form>
+          <HelpCircle className="size-4" />
+          Help
+        </Link>
+        <form action={logout}>
+          <button
+            type="submit"
+            className="flex w-full items-center gap-2.5 rounded-full px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <LogOut className="size-4" />
+            Sign out
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
