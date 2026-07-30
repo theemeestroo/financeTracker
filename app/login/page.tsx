@@ -7,16 +7,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function LoginPage() {
   const [state, action, pending] = useActionState(login, undefined);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <Card className="w-full max-w-sm">
         <CardHeader>
           <div className="mb-2 flex items-center gap-2.5">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+            <span className="gradient-brand flex size-9 shrink-0 items-center justify-center rounded-2xl text-primary-foreground">
               <PlaneTakeoff className="size-4.5" />
             </span>
             <span className="text-base font-semibold tracking-tight">Runaway</span>

@@ -14,7 +14,7 @@
 
 ```
 app/
-  layout.tsx              root layout — fonts, metadata, global <Toaster/>, no auth logic
+  layout.tsx              root layout — fonts, metadata, ThemeProvider (next-themes) + global <Toaster/>, no auth logic
   error.tsx                outermost error boundary
   login/page.tsx            sign-in form (outside the authenticated shell)
   (app)/                   route group — every authenticated page
@@ -27,7 +27,7 @@ app/
 components/
   ui/                      shadcn/base-ui design-system primitives (button, card, tabs, table, ...)
   charts/                  Recharts widgets (depletion-chart, comparison-chart, category-breakdown-chart, runway-projection, surplus-tile)
-  app-sidebar.tsx, delete-button.tsx, checklist-item-checkbox.tsx, collapsible-table-group.tsx, currency-amount.tsx
+  app-sidebar.tsx, theme-toggle.tsx, delete-button.tsx, checklist-item-checkbox.tsx, collapsible-table-group.tsx, currency-amount.tsx
 lib/
   tax/            German wage tax, social contributions, Fünftelregelung
   severance/      severance package sizing, statutory floor, redundancy checklist
@@ -57,7 +57,7 @@ app/layout.tsx (fonts, <Toaster/>)
      └─ every authenticated page
 ```
 
-There is no client-side theme/context provider tree beyond `next-themes`' `useTheme()` hook used inside `components/ui/sonner.tsx` (Sonner's own toast styling) — no `ThemeProvider` wraps the app, and there's no light/dark toggle. See `claude.md`'s Design Language section for the current color system (a single dark palette applied globally via CSS custom properties in `app/globals.css`, no `.dark`-class toggle in use).
+`app/layout.tsx` wraps `{children}` (and `<Toaster/>`) in `next-themes`' `<ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>` — the app's one client-side context provider. It toggles a `.dark` class on `<html>`, persisted client-side (localStorage) via next-themes; `<html>` carries `suppressHydrationWarning` since next-themes sets that class before hydration. `components/theme-toggle.tsx` (`useTheme()`) is the only consumer-facing control, rendered in the sidebar footer (desktop + mobile drawer) and the login page; `components/ui/sonner.tsx`'s own `useTheme()` call now resolves for real (it predates the provider and previously always fell back to its `"system"` default). See `claude.md`'s Design Language section for the dual-theme color system (`:root` = light, `.dark` = dark, both defined via CSS custom properties in `app/globals.css`).
 
 ## Design principles this codebase holds itself to
 

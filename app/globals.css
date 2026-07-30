@@ -36,6 +36,7 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-primary-2: var(--primary-2);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -49,11 +50,109 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * Dual-theme, vibrant finance-native UI — dark is the default/brand identity,
+ * light is a fully-designed alternative behind the sidebar's theme toggle
+ * (`components/theme-toggle.tsx`, next-themes `attribute="class"`). Brand
+ * chrome (buttons, active nav pill, tab indicator, focus ring) is indigo —
+ * deliberately decoupled from --status-good, which stays teal/green as a
+ * pure semantic "positive" signal instead of doing brand-color double duty.
+ * Every other status/categorical token is unchanged from the original
+ * single-dark-theme rollout; see git history for that "warm-monochrome"
+ * light theme this replaced before the dark rollout, and
+ * DESIGN-financial-runway-app-v2.md for the feature spec (doesn't cover
+ * color).
+ */
 :root {
-  /* Site-wide dark, vibrant theme (rolled out from the severance-scenario
-     flagship pilot — see git history for the light "warm-monochrome" theme
-     this replaced). Page canvas — the outer near-black navy behind the
-     floating sidebar/content panels. */
+  /* Light theme. Soft lavender-tinted neutrals rather than stark white/grey,
+     so the light mode still reads as "this app" and not a generic invert —
+     --foreground reuses the dark theme's --background hex as a deliberate
+     "ink" callback. */
+  --background: #f3f2f9;
+  --foreground: #14131f;
+  --card: #ffffff;
+  --card-foreground: #14131f;
+  --popover: #ffffff;
+  --popover-foreground: #14131f;
+  /* Indigo — brand chrome only (buttons, active nav pill, tab indicator,
+     ring). Same hex in both themes, like --status-good's single teal swatch
+     below; white label text clears 4.47:1 on this fill in both modes
+     (better than near-black's 4.24:1, unlike teal/blue which prefer dark
+     text — indigo sits closer to the dark end of the lightness band). */
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  /* Gradient partner for the "Glow" treatment (`.gradient-brand` below) —
+     pink, reusing --series-3 rather than inventing a 5th hue. Not used for
+     data; if that changes, re-run the categorical validator. */
+  --primary-2: #ec4899;
+  --secondary: #ece9f6;
+  --secondary-foreground: #14131f;
+  --muted: #ece9f6;
+  --muted-foreground: #6b6980;
+  --accent: #e8e3fb;
+  --accent-foreground: #14131f;
+  /* Deeper than the dark theme's --destructive — the dark-tuned pastel red
+     reads as washed-out on a light/white surface; re-validated standalone
+     below. */
+  --destructive: #dc2626;
+  --border: #e2dfee;
+  --input: #e2dfee;
+  --ring: #6366f1;
+  /* Single-series monochrome-adjacent ramp (category breakdown bars,
+     depletion line) — muted lavender-grey to teal. Neutrals are darker than
+     the surface (not lighter, like the dark theme's) since a light-mode bar
+     has to read *against* a light card. */
+  --chart-1: #cbc7e0;
+  --chart-2: #a29dc4;
+  --chart-3: #3b82f6;
+  --chart-4: #2ab0a0;
+  --chart-5: #0d9488;
+  --radius: 1rem;
+  /* Floating sidebar card's surface — a shade more tinted than --card, same
+     "distinct but harmonious neutrals" relationship the dark theme has
+     between its darker sidebar and card. */
+  --sidebar: #ece9f6;
+  --sidebar-foreground: #14131f;
+  --sidebar-primary: #6366f1;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e8e3fb;
+  --sidebar-accent-foreground: #14131f;
+  --sidebar-border: #e2dfee;
+  --sidebar-ring: #6366f1;
+  /* Content panel tint — the main scrollable area's floating card. */
+  --content-panel: #ffffff;
+  /* Status colors for semantic data (surplus/deficit, risk flags) —
+     reserved, never used for categorical series, and never used for brand
+     chrome (see --primary above). Teal/blue/pink/amber all clear the
+     light-mode categorical checks (OKLCH lightness band, chroma floor, CVD
+     adjacent-pair separation) at surface #ffffff — re-run
+     `validate_palette.js "#0d9488,#3b82f6,#ec4899,#d97706" --mode light` if
+     any of the four ever change. */
+  --status-good: #0d9488;
+  --status-critical: #dc2626;
+  /* Amber tri-state accent — reserved for genuine "ending soon" data (a
+     commitment/income row whose end_date falls within the next 60 days).
+     Never used as chrome or repurposed as a 5th categorical hue. Deeper than
+     the dark theme's amber for the same light-surface-legibility reason as
+     --destructive above. */
+  --status-warning: #b45309;
+  /* Amber accent — flags a commitment marked discretionary (non-essential).
+     Distinct token from --status-warning so the two meanings never collide. */
+  --status-discretionary: #b45309;
+  /* Categorical series colors — for telling distinct entities apart (e.g.
+     scenarios in a comparison chart). Never reused for single-series charts,
+     which stay on the --chart-* tokens above. Order matters: this is the
+     fixed hue order the dataviz skill's CVD-adjacency check validated —
+     don't reorder without re-running it. */
+  --series-1: #0d9488;
+  --series-2: #3b82f6;
+  --series-3: #ec4899;
+  --series-4: #b45309;
+}
+
+.dark {
+  /* Dark theme — the default brand identity. Near-black navy canvas behind
+     the floating sidebar/content panels. */
   --background: #14131f;
   --foreground: #f5f5f7;
   /* Raised navy surface: cards, table rows, popovers. */
@@ -61,10 +160,10 @@
   --card-foreground: #f5f5f7;
   --popover: #211f33;
   --popover-foreground: #f5f5f7;
-  /* Teal — primary buttons, active nav pill, and --status-good (deliberate
-     double duty: this app's single accent doubles as "positive/brand"). */
-  --primary: #0d9488;
-  --primary-foreground: #0b1210;
+  /* Indigo — brand chrome only; see :root's --primary comment. */
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --primary-2: #ec4899;
   --secondary: #232236;
   --secondary-foreground: #f5f5f7;
   --muted: #232236;
@@ -74,7 +173,7 @@
   --destructive: #fb5b6b;
   --border: #2b2a44;
   --input: #2b2a44;
-  --ring: #0d9488;
+  --ring: #6366f1;
   /* Single-series monochrome-adjacent ramp (category breakdown bars,
      depletion line) — muted navy to teal. */
   --chart-1: #423f5c;
@@ -83,26 +182,24 @@
   --chart-4: #2ab0a0;
   --chart-5: #0d9488;
   --radius: 1rem;
-  /* Floating sidebar card's surface — a shade darker than --card, same
-     "distinct but harmonious neutrals" relationship the light theme had
-     between its white sidebar and mint content panel. */
+  /* Floating sidebar card's surface — a shade darker than --card. */
   --sidebar: #1a1926;
   --sidebar-foreground: #f5f5f7;
-  --sidebar-primary: #0d9488;
-  --sidebar-primary-foreground: #0b1210;
+  --sidebar-primary: #6366f1;
+  --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #262445;
   --sidebar-accent-foreground: #f5f5f7;
   --sidebar-border: #2b2a44;
-  --sidebar-ring: #0d9488;
+  --sidebar-ring: #6366f1;
   /* Content panel tint — the main scrollable area's floating card. */
   --content-panel: #1e1d2e;
   /* Status colors for semantic data (surplus/deficit, risk flags) —
-     reserved, never used for categorical series. Palette chosen and
-     validated with the dataviz skill (scripts/validate_palette.js): teal/
-     blue/pink/amber all clear the dark-mode categorical checks (OKLCH
-     lightness band, chroma floor, CVD adjacent-pair separation) at surface
-     #1e1d2e, and each clears WCAG text contrast on both the page (#14131f)
-     and card surface standalone. */
+     reserved, never used for categorical series or brand chrome. Palette
+     chosen and validated with the dataviz skill
+     (scripts/validate_palette.js): teal/blue/pink/amber all clear the
+     dark-mode categorical checks (OKLCH lightness band, chroma floor, CVD
+     adjacent-pair separation) at surface #1e1d2e, and each clears WCAG text
+     contrast on both the page (#14131f) and card surface standalone. */
   --status-good: #0d9488;
   --status-critical: #fb5b6b;
   /* Amber tri-state accent — reserved for genuine "ending soon" data (a
@@ -130,5 +227,39 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+@layer components {
+  /* "Glow" brand treatment: a gradient version of brand chrome (buttons,
+     active nav pill, tab indicator) instead of a flat --primary fill, plus
+     a colour-matched lift on hover for metric tiles. Centralized here so
+     every surface picks up the same gradient/glow without repeating the
+     recipe per component. */
+  .gradient-brand {
+    background-image: linear-gradient(135deg, var(--primary), var(--primary-2));
+  }
+  .glow-card {
+    transition:
+      transform 0.2s ease,
+      filter 0.2s ease;
+  }
+  .glow-card:hover {
+    /* `filter` rather than `box-shadow` deliberately — Card's own `ring-1`
+       utility compiles to a box-shadow in Tailwind's utilities layer, which
+       always wins over this `@layer components` rule regardless of source
+       order, so a box-shadow glow here would be silently discarded instead
+       of layering with the ring. drop-shadow() is a different property and
+       can't collide with it. */
+    transform: translateY(-2px);
+    filter: drop-shadow(0 14px 20px color-mix(in oklch, var(--primary), transparent 60%));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .glow-card,
+    .glow-card:hover {
+      transition: none;
+      transform: none;
+      filter: none;
+    }
   }
 }

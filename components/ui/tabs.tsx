@@ -33,7 +33,7 @@ function TabsIndicator({ className, ...props }: TabsPrimitive.Indicator.Props) {
     <TabsPrimitive.Indicator
       data-slot="tabs-indicator"
       className={cn(
-        "absolute top-0 left-0 z-0 rounded-full bg-primary transition-all duration-300 ease-out",
+        "gradient-brand absolute top-0 left-0 z-0 rounded-full transition-all duration-300 ease-out",
         className
       )}
       style={{

@@ -37,7 +37,7 @@ export function calculateSeverancePackage(input: SeverancePackageInput): Severan
     (input.include_bonus_in_calc ? input.annual_bonus / 12 : 0) +
     (input.include_car_in_calc ? input.annual_car_benefit / 12 : 0) +
     (input.include_christmas_bonus_in_calc
-      ? monthlyBase * ((input.christmas_bonus_pct ?? 0) / 100)
+      ? (monthlyBase * ((input.christmas_bonus_pct ?? 0) / 100)) / 12
       : 0);
 
   const formulaGross = (input.severance_multiplier ?? 0) * (input.years_of_service ?? 0) * monthlyBaseForCalc;

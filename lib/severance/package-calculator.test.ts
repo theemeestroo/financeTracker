@@ -58,8 +58,8 @@ describe("calculateSeverancePackage", () => {
       include_christmas_bonus_in_calc: true,
     });
     const without = calculateSeverancePackage(base);
-    // 100% of monthly_base_salary (10480) added to the calc base
-    expect(withXmas.monthlyBaseForCalc).toBeCloseTo(without.monthlyBaseForCalc + 10480, 2);
+    // 100% of monthly_base_salary (10480), paid once a year, amortized over 12 months
+    expect(withXmas.monthlyBaseForCalc).toBeCloseTo(without.monthlyBaseForCalc + 10480 / 12, 2);
   });
 
   it("leaves the calc base unchanged when christmas bonus is not included", () => {

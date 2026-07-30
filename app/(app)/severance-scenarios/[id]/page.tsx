@@ -250,7 +250,7 @@ export default async function ScenarioDetailPage({
         </AddDisclosure>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatTile
               icon={CalendarClock}
               label="Runway status"

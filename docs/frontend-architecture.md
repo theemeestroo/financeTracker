@@ -47,7 +47,7 @@ All routes live under `app/(app)/` (the authenticated shell) except `/login` and
 
 ## Layout & provider chain
 
-- **`app/layout.tsx`** (root) — loads `Host_Grotesk` (`--font-sans`) and `Geist_Mono` (`--font-geist-mono`) via `next/font/google`, sets metadata, renders `{children}` plus a single global `<Toaster />`. No auth logic, no data fetching.
+- **`app/layout.tsx`** (root) — loads `Host_Grotesk` (`--font-sans`) and `Geist_Mono` (`--font-geist-mono`) via `next/font/google`, sets metadata, wraps `{children}` and a single global `<Toaster />` in `next-themes`' `<ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>` (`<html>` carries `suppressHydrationWarning` for it). No auth logic, no data fetching.
 - **`app/(app)/layout.tsx`** (route group layout) — Server Component. Creates a Supabase server client, calls `supabase.auth.getUser()`; redirects to `/login` if unauthenticated (a page-level auth check *in addition to* the request-level proxy gate — see `docs/auth-and-security.md`). If authenticated, renders `<AppSidebar userEmail={user.email}>` plus a `<main>` panel (`rounded-[2rem] bg-content-panel`) wrapping `{children}` in a scrollable padded container.
 
 `/login` and the root `error.tsx` sit outside `(app)/layout.tsx` — no sidebar shell.
@@ -57,7 +57,8 @@ All routes live under `app/(app)/` (the authenticated shell) except `/login` and
 **`components/ui/` — design-system primitives** (shadcn/ui patterns on `@base-ui/react`, not Radix): `avatar`, `badge`, `button`, `calendar`, `card`, `checkbox`, `date-picker`, `dialog`, `input`, `label`, `native-select`, `popover`, `select`, `separator`, `sheet`, `sidebar` (scaffolded, currently unused — `app-sidebar.tsx` is a hand-rolled replacement), `skeleton`, `sonner` (toast host), `table`, `tabs` (sliding-indicator pill tabs, added for the severance scenario page's Overview/Cash Flow/Timeline/Checklist split — reusable for any future page with more than ~4 logical sections), `tooltip`.
 
 **`components/*.tsx` — feature-level shared components**
-- `app-sidebar.tsx` — client; the app's primary nav. `usePathname`-aware: the active route renders as a solid pill, the rest as a 2-column grid of icon tiles; includes a mobile drawer (`Sheet`) and the sign-out form.
+- `app-sidebar.tsx` — client; the app's primary nav. `usePathname`-aware: the active route renders as a `gradient-brand` pill, the rest as a 2-column grid of icon tiles; includes a mobile drawer (`Sheet`), the theme toggle, and the sign-out form.
+- `theme-toggle.tsx` — client; `next-themes`' `useTheme()`. Sun/moon icon button (`variant="icon"`, used in the mobile top bar and the login page) or a labeled row matching the sidebar's Help/Sign-out style (`variant="row"`, sidebar footer). Guards against hydration mismatch by rendering the light-mode target until mounted.
 - `checklist-item-checkbox.tsx` — client; checkbox that auto-submits a bound server action on change (severance-scenario checklist toggling).
 - `collapsible-table-group.tsx` — client; collapsible row-group wrapper for `<Table>`, starts collapsed — groups commitments/income rows by category or profile.
 - `currency-amount.tsx` — server; renders a EUR-first amount with the as-entered currency shown underneath when non-EUR.

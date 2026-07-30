@@ -16,7 +16,7 @@ export function SurplusTile({
   const statusColor = isSurplus ? "var(--status-good)" : "var(--status-critical)";
 
   return (
-    <Card>
+    <Card className="glow-card">
       <CardHeader>
         <CardTitle className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
           {label}

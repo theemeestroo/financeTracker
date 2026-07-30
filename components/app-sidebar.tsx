@@ -25,6 +25,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { logout } from "@/lib/actions/auth";
 
 const NAV_ITEMS = [
@@ -53,7 +54,7 @@ function initialsFromEmail(email: string) {
 function Logo() {
   return (
     <Link href="/" className="flex items-center gap-2.5">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+      <span className="gradient-brand flex size-9 shrink-0 items-center justify-center rounded-2xl text-primary-foreground">
         <PlaneTakeoff className="size-4.5" />
       </span>
       <span className="text-base font-semibold tracking-tight">Runaway</span>
@@ -76,7 +77,7 @@ function NavGrid({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
         href={active.href}
         onClick={onNavigate}
         aria-current="page"
-        className="flex w-full items-center gap-2.5 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground"
+        className="gradient-brand flex w-full items-center gap-2.5 rounded-full px-4 py-3 text-sm font-semibold text-primary-foreground"
       >
         <active.icon className="size-4" />
         {active.label}
@@ -117,6 +118,7 @@ function SidebarBody({ pathname, userEmail, onNavigate }: { pathname: string; us
       <NavGrid pathname={pathname} onNavigate={onNavigate} />
 
       <div className="mt-auto flex flex-col gap-1">
+        <ThemeToggle variant="row" />
         <Link
           href="/help"
           onClick={onNavigate}
@@ -148,23 +150,26 @@ export function AppSidebar({ userEmail }: { userEmail: string }) {
       {/* Mobile: compact top bar with a drawer for the full nav. */}
       <div className="flex items-center justify-between md:hidden">
         <Logo />
-        <Sheet>
-          <SheetTrigger
-            render={<Button variant="outline" size="icon-sm" aria-label="Open navigation" />}
-          >
-            <Menu className="size-4" />
-          </SheetTrigger>
-          <SheetContent
-            side="left"
-            className="w-72 gap-0 rounded-r-[2rem] border-r-0 bg-sidebar p-5"
-          >
-            <SheetHeader className="sr-only">
-              <SheetTitle>Navigation</SheetTitle>
-              <SheetDescription>App navigation and account.</SheetDescription>
-            </SheetHeader>
-            <SidebarBody pathname={pathname} userEmail={userEmail} />
-          </SheetContent>
-        </Sheet>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <Sheet>
+            <SheetTrigger
+              render={<Button variant="outline" size="icon-sm" aria-label="Open navigation" />}
+            >
+              <Menu className="size-4" />
+            </SheetTrigger>
+            <SheetContent
+              side="left"
+              className="w-72 gap-0 rounded-r-[2rem] border-r-0 bg-sidebar p-5"
+            >
+              <SheetHeader className="sr-only">
+                <SheetTitle>Navigation</SheetTitle>
+                <SheetDescription>App navigation and account.</SheetDescription>
+              </SheetHeader>
+              <SidebarBody pathname={pathname} userEmail={userEmail} />
+            </SheetContent>
+          </Sheet>
+        </div>
       </div>
 
       {/* Desktop: floating white sidebar panel. */}

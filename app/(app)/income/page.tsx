@@ -263,7 +263,7 @@ export default async function IncomePage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Card>
+        <Card className="glow-card">
           <CardHeader>
             <CardTitle className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
               Total monthly (net)
@@ -288,7 +288,7 @@ export default async function IncomePage() {
             )}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="glow-card">
           <CardHeader>
             <CardTitle className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
               Total monthly (gross)
