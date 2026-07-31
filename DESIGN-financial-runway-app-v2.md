@@ -1,6 +1,6 @@
 # Design & Implementation Plan v2: Life After Redundancy
 
-Companion to [DESIGN-financial-runway-app.md](DESIGN-financial-runway-app.md) (v1 — Phases 0–8, complete) and [PRD-financial-runway-app.md](PRD-financial-runway-app.md). v1 built a real German tax engine, a severance package calculator, and a month-by-month runway projector. **All of Tier 1 — ALG I income, post-severance health insurance, and the Sperrzeit risk indicator — has since shipped** (§0.1 below), **Tier 2's scenario variant generator (§2.4) has too**, and **Tier 3's redundancy checklist (§2.7) has too**. This doc now tracks what's left: the do-nothing baseline overlay + sensitivity panel (rest of Tier 2), the tax refund estimator + reality check-ins (rest of Tier 3), and Tier 4's backlog.
+Companion to [DESIGN-financial-runway-app.md](DESIGN-financial-runway-app.md) (v1 — Phases 0–8, complete) and [PRD-financial-runway-app.md](PRD-financial-runway-app.md). v1 built a real German tax engine, a severance package calculator, and a month-by-month runway projector. **All of Tier 1 — ALG I income, post-severance health insurance, and the Sperrzeit risk indicator — has since shipped** (§0.1 below), and **all of Tier 2 — the scenario variant generator (§2.4), the do-nothing baseline overlay (§2.5), and the runway sensitivity panel (§2.6) — has too**, and **Tier 3's redundancy checklist (§2.7) has too**. This doc now tracks what's left: the tax refund estimator + reality check-ins (rest of Tier 3), and Tier 4's backlog.
 
 ## 0. The core gap (status: closed)
 
@@ -56,11 +56,17 @@ Previously, modeling "what if the job search takes longer" meant manually clonin
 
 Deviates from the original spec in one way: it does its own explicit field-by-field clone (mirroring `cloneLivingProfile`'s style) rather than literally reusing that function, since `cloneLivingProfile` clones a *Living Profile* (commitments/income) and a scenario clone needs a different set of child tables (packages/phases/events/property-ends) — "reuses `cloneLivingProfile`'s clone pattern" (fetch → map → insert, id-remapping only where a child table cross-references another cloned child) held, the function itself didn't. "Previous salary" is a combined-household sum across all packages — correct for the common single-earner case, a documented approximation for a two-package (couple) scenario, same spirit as the salary-cutoff note in `resolve-scenario.ts` (events aren't attributed to a household member).
 
-**2.5 "Do-nothing" baseline overlay — not started.**
-The dashboard already computes the household's current net monthly surplus/deficit — but nothing projects it forward as a reference line against a severance scenario's balance curve, so there's no visual answer to "at what point does taking the package start costing me money vs. just staying?" Add a straight reference line (today's surplus/deficit × months, from a starting point) to both the single-scenario `DepletionChart` and the multi-scenario `ComparisonChart`. Needs one small new input: a **current liquid savings figure** (a single number, distinct from any severance scenario's `starting_balance`, since "do nothing" has no severance) — proposed as a nullable field on the baseline `living_profiles` row.
+**2.5 "Do-nothing" baseline overlay — ✅ Shipped.**
+The dashboard already computed the household's current net monthly surplus/deficit; `lib/runway/baseline.ts`'s `projectDoNothingBaseline(dates, startingBalance, monthlySurplus)` projects it forward as a straight reference line (today's surplus/deficit × months, from a starting point) over the same `dates` as a scenario's own series, so it overlays point-for-point. Wired into both the single-scenario `DepletionChart` (dashed `Line`, `--muted-foreground`, gated behind a new `baselineSeries` prop threaded through `RunwayProjection`) and the multi-scenario `ComparisonChart` (a `dashed`-flagged `ComparisonSeries` entry, same visual treatment). `living_profiles.current_liquid_savings numeric(10,2)` (nullable, baseline-row-only in intent) shipped as planned, editable via a new "Current liquid savings" card + `BaselineSavingsForm` on the baseline profile page, `updateCurrentLiquidSavings` action.
 
-**2.6 Runway sensitivity panel — not started.**
-"If you cut X, how much longer does this last?" — for each discretionary (`essential = false`) category already surfaced by `categoryBreakdown`, re-run `projectRunway` with that category zeroed out and diff the depletion date. Purely derived — no new schema, one new `lib/runway` function (`sensitivityAnalysis`), a ranked list on the scenario detail page ("Cutting **Leisure/Discretionary** adds ~3.4 months").
+One deviation from the original spec: rather than each call site re-deriving "today's net monthly surplus/deficit" itself, `lib/finance/baseline-profile.ts` gained `getBaselineRunwayInputs(supabase)` — a single helper that re-fetches the baseline profile's own commitments/income and runs the exact same aggregation the Overview dashboard uses (`activeCommitments`/`activeIncome`/`totalMonthlyCommitments`/`totalMonthlyNetIncome`, evaluated `today`), returning `{ currentLiquidSavings, monthlySurplus }`. Both `severance-scenarios/[id]/page.tsx` and `compare/page.tsx` call it directly — the baseline line reflects the household's actual current situation, not a snapshot frozen into any one scenario. When `current_liquid_savings` is unset, the overlay is simply omitted (not assumed 0), with a hint + link to the baseline profile page on the scenario detail view.
+
+**2.6 Runway sensitivity panel — ✅ Shipped.**
+"If you cut X, how much longer does this last?" — `lib/runway/sensitivity.ts`'s `sensitivityAnalysis(scenario)` gathers every discretionary (`essential = false`) category present anywhere across the scenario's phases, re-runs `projectRunway` with that category's non-essential commitments removed, and diffs the resulting depletion month-index against the baseline. Purely derived, no new schema, as planned. A ranked list ("Cutting **Leisure / Discretionary** — 900 €/mo → +7 months") renders in its own **Spend Analysis** tab on the scenario detail page (moved out of Cash Flow after initial shipping — see below), hidden entirely when the array is empty (baseline already sustainable within the horizon, or no discretionary spend to cut).
+
+Three details the original one-line spec didn't cover, all resolved conservatively: (1) a commitment carried unchanged into a later phase is deduped by id before summing `monthlyAmount`, so it isn't double-counted just because it appears in two phases' commitment lists; (2) when cutting a category pushes the projection past the horizon entirely (no depletion date left to diff against), `monthsAdded` reports a lower bound (`horizonLength − baselineDepletionIndex`) and the entry is flagged `becomesSustainable`, surfaced in the UI as "+N months (at least)" rather than a false-precision exact figure; (3) each entry also carries the individual commitments behind its total (`lines: {name, monthlyAmount}[]`, sorted descending) and both depletion dates (`baselineDepletionDate`/`newDepletionDate`) — not in the original spec, added when the UI moved to a collapsible-row layout so each summarized saving has real detail to expand into rather than just re-stating the summary.
+
+**Post-ship revision** (separate follow-up request, same session): moved from a card at the bottom of Cash Flow into its own **Spend Analysis** tab (after Cash Flow, before Timeline — `Scissors` icon), and each row went from a flat summary line to a collapsible one (`sensitivity-entry.tsx`, client, chevron-rotate convention matching `CollapsibleTableGroup`) — starts rolled up, expands to the category's individual commitment line items plus a plain-language "Effect: depletion moves from **X** to **Y**" sentence (or "beyond the projection horizon" when `becomesSustainable`).
 
 ### Tier 3 — Rounding out the redundancy-companion angle
 
@@ -87,7 +93,7 @@ Respects the "no bank sync" non-goal on purpose: a small `runway_checkins` table
 
 ## 3. Data Model Additions
 
-Already applied (§0.1, §2.7 — see migrations `20260727090100_alg1_health_insurance.sql`, `20260727090200_unemployment_benefit_parameters.sql`, `20260727093200_household_member_health_insurance.sql`, `20260727103600_scenario_checklist_items.sql`): `household_members.date_of_birth`, `household_members.{statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium}`, `severance_scenario_packages.{claim_unemployment_benefit, unemployment_benefit_defer_months, months_insured_override, new_job_start_date}`, the `unemployment_benefit_parameters` table, and the `scenario_checklist_items` table (shape unchanged from the original spec below). Not repeated below.
+Already applied (§0.1, §2.5, §2.7 — see migrations `20260727090100_alg1_health_insurance.sql`, `20260727090200_unemployment_benefit_parameters.sql`, `20260727093200_household_member_health_insurance.sql`, `20260727103600_scenario_checklist_items.sql`, `20260731090000_baseline_liquid_savings.sql`): `household_members.date_of_birth`, `household_members.{statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium}`, `severance_scenario_packages.{claim_unemployment_benefit, unemployment_benefit_defer_months, months_insured_override, new_job_start_date}`, the `unemployment_benefit_parameters` table, the `scenario_checklist_items` table, and `living_profiles.current_liquid_savings` (shape unchanged from the original spec below). Not repeated below.
 
 Still needed, for the remaining features:
 
@@ -96,9 +102,7 @@ Still needed, for the remaining features:
 -- package/scenario already has (notice period observed, severance vs.
 -- statutory-formula ceiling).
 
--- "Do-nothing" baseline (§2.5) needs a starting point independent of any
--- severance scenario. Only meaningful on the baseline living_profiles row.
-alter table living_profiles add column current_liquid_savings numeric(10,2);
+-- "Do-nothing" baseline (§2.5) — ✅ applied as planned, see above.
 
 -- Reality check-ins (§2.9)
 create table runway_checkins (
@@ -132,7 +136,9 @@ lib/
                             --   Sperrzeit shift needed no changes here — applied to
                             --   algStartDate in resolve-scenario.ts before the stream
                             --   is built (§0.1).
-    sensitivity.ts          -- NOT STARTED (§2.6): sensitivityAnalysis(scenario) → per-category runway delta
+    sensitivity.ts          -- ✅ SHIPPED (§2.6): sensitivityAnalysis(scenario) → per-category runway delta
+    baseline.ts             -- ✅ SHIPPED (§2.5, not in the original module list):
+                            --   projectDoNothingBaseline(dates, startingBalance, monthlySurplus)
   severance/
     package-calculator.ts   -- ✅ EXTENDED: statutoryFloor(monthlyBaseSalary, yearsOfService) (§2.3/§2.11)
     checklist.ts            -- ✅ NEW (§2.7): CHECKLIST_TEMPLATE + generateChecklistItems(anchorDate)
@@ -162,16 +168,16 @@ See §0.1 for the as-built shape and its deliberate deviations from the original
 - `resolve-scenario.ts`: when flagged, shifts `algStartDate`/`algEndDate` by the Sperrzeit length (rounded to 3 months), additively with any `unemployment_benefit_defer_months` — ✅ shipped. (Applied in the resolver, not `project-runway.ts` itself — see §0.1 for why that needed no engine changes.)
 - **Done when**: a scenario with a severance multiplier above the statutory-floor test shows the risk banner and a visibly delayed ALG I start in the chart; one at/below the floor with notice observed shows no flag. — confirmed via `lib/unemployment/sperrzeit.test.ts`'s boundary cases; no live-scenario manual verification yet (no login credentials in this environment).
 
-### Phase 3 — Baseline Comparison & Scenario Variants — partially shipped (2.4 done, 2.5 not started)
-- ~~`living_profiles.current_liquid_savings` migration + a small input on the baseline profile page.~~ Not started (§2.5).
-- ~~"Do-nothing" reference line on `DepletionChart` and `ComparisonChart`.~~ Not started (§2.5).
+### Phase 3 — Baseline Comparison & Scenario Variants — ✅ Shipped
+- `living_profiles.current_liquid_savings` migration + a small input on the baseline profile page — ✅ shipped (§2.5).
+- "Do-nothing" reference line on `DepletionChart` and `ComparisonChart` — ✅ shipped (§2.5).
 - "Generate variants" action (clone + parameterized `recurring_income_start` offset) on the scenario detail page, opening `compare/page.tsx` pre-selected — ✅ shipped (§2.4), see §2.4 for the as-built shape.
-- **Done when**: comparing a scenario against the do-nothing baseline visually answers "does taking this package ever put me behind where I'd be otherwise?" (still open, §2.5), and three job-search-timing variants can be generated and compared in under a minute (PRD §9's "under a minute" bar, extended to this workflow) — ✅ met: "Generate variants" is one form submission from the scenario detail page straight to the compare results.
+- **Done when**: comparing a scenario against the do-nothing baseline visually answers "does taking this package ever put me behind where I'd be otherwise?" — ✅ met (§2.5), and three job-search-timing variants can be generated and compared in under a minute (PRD §9's "under a minute" bar, extended to this workflow) — ✅ met: "Generate variants" is one form submission from the scenario detail page straight to the compare results.
 
-### Phase 4 — Runway Sensitivity Panel
-- `lib/runway/sensitivity.ts` + unit tests.
-- Ranked panel on the scenario detail page.
-- **Done when**: for a scenario with ≥2 discretionary categories, the panel correctly ranks them by runway-months-if-cut against a hand-computed check.
+### Phase 4 — Runway Sensitivity Panel — ✅ Shipped
+- `lib/runway/sensitivity.ts` + unit tests — ✅ shipped (`sensitivity.test.ts`, hand-computed fixtures: ranking, the sustainable/lower-bound edge case, empty-baseline, no-discretionary-spend, cross-phase dedup, and multi-commitment-per-category detail lines).
+- Ranked panel on the scenario detail page — ✅ shipped, in its own Spend Analysis tab (moved off Cash Flow post-ship), each row collapsible to its detail lines + effect sentence; hidden entirely when empty.
+- **Done when**: for a scenario with ≥2 discretionary categories, the panel correctly ranks them by runway-months-if-cut against a hand-computed check — ✅ met, confirmed via `sensitivity.test.ts`'s ranking case (a 1,500 €/mo cut ranked above a 100 €/mo cut, +2 vs +1 months against a hand-computed baseline). No live-scenario manual verification (no login credentials in this environment) — verified instead via a temporary public preview route rendering the real components against synthetic data mirroring a real scenario shape (see `docs/development-guide.md`), screenshotted, then reverted.
 
 ### Phase 5 — Redundancy Checklist — ✅ Shipped
 - `scenario_checklist_items` table + static template (Meldepflicht, ALG I application, health insurance decision, Aufhebungsvertrag consideration period, Arbeitszeugnis) with due-date rules relative to scenario dates — ✅ shipped, relative to the earliest package's `severance_start_date` rather than a scenario-level date (see §2.7 for why).
@@ -193,7 +199,7 @@ See §0.1 for the as-built shape and its deliberate deviations from the original
 
 ## 6. Testing Strategy Addendum
 
-Same bar as v1 §11: `lib/unemployment/` and the `project-runway.ts`/`lib/tax` extensions are pure functions and get the primary correctness investment (Vitest, known-answer fixtures sourced from official Bundesagentur/BMF publications, not self-consistency checks). Shipped so far (`lib/unemployment/*.test.ts`, extended `lib/runway/project-runway.test.ts`) follows this. UI/CRUD stays manual-verification-in-browser per house convention — not yet possible in this environment (no login credentials).
+Same bar as v1 §11: `lib/unemployment/` and the `project-runway.ts`/`lib/tax` extensions are pure functions and get the primary correctness investment (Vitest, known-answer fixtures sourced from official Bundesagentur/BMF publications, not self-consistency checks). Shipped so far (`lib/unemployment/*.test.ts`, extended `lib/runway/project-runway.test.ts`, `lib/runway/baseline.test.ts`, `lib/runway/sensitivity.test.ts`) follows this — the latter two are hand-computed against synthetic scenarios rather than official published figures, since §2.5/§2.6 are pure derived math over this app's own model, not a German-law formula to source from an external publication. UI/CRUD stays manual-verification-in-browser per house convention — no login credentials in this environment, so verified instead via a temporary public preview route (`docs/development-guide.md`) rendering the real components, screenshotted, then reverted — used for §2.5/§2.6's UI this pass.
 
 ## 7. Risks / Open Items
 
@@ -203,7 +209,7 @@ Same bar as v1 §11: `lib/unemployment/` and the `project-runway.ts`/`lib/tax` e
 - **Voluntary-GKV and PKV-subsidy figures (shipped, §2.2) are minimum/ceiling assumptions**, not individually underwritten numbers — actual voluntary GKV contributions and PKV Zuschuss amounts depend on specifics (declared income, existing PKV contract terms) this app doesn't and shouldn't try to fully model. Flagged in `lib/unemployment/parameters.ts`'s header and the seed migration's comment. Same disclaimer spirit as the Sperrzeit indicator below.
 - **Sperrzeit is genuinely legally nuanced** — real determinations turn on facts this app doesn't and shouldn't try to fully capture (the specific "wichtiger Grund" exceptions, individual Agentur discretion, and this app's own "notice period observed" proxy — see §0.1 — which is a data-availability simplification, not a legal test). Shipped as a heuristic risk *indicator*, worded as such (`assessSperrzeitRisk`'s reason string always ends in "confirm with the Agentur für Arbeit before relying on this timeline"), not a determination. This is one of two areas in this doc (with the deferral/eligibility note above) where getting the disclaimer copy right matters as much as getting the math right.
 - **Unemployment benefit parameters need the same yearly maintenance** `tax_year_parameters` already does (v1 §12) — bundle the update into the same annual pass now that both exist.
-- **`current_liquid_savings` (§2.5, not yet built) will be self-reported and go stale** the moment real spending diverges from plan — Phase 7's check-ins are the intended mitigation, not a separate concern; consider surfacing "last updated" next to the figure once both exist, same spirit as v1 §12's living-profile staleness note.
+- **`current_liquid_savings` (§2.5, shipped) is self-reported and will go stale** the moment real spending diverges from plan — Phase 7's check-ins are the intended mitigation, not a separate concern. Still not surfaced: a "last updated" note next to the figure (same spirit as v1 §12's living-profile staleness note) — the column has no dedicated `updated_at`, only the row's own, which also moves on an unrelated rename. Worth adding once Phase 7 exists and there's an actual staleness signal to show.
 - Tier 4 items are deliberately underspecified — they're backlog, not committed scope. Expand each into its own short design note if and when it's actually picked up.
 
 ## Appendix: Feature Backlog Table
@@ -214,8 +220,8 @@ Same bar as v1 §11: `lib/unemployment/` and the `project-runway.ts`/`lib/tax` e
 | 2.2 | Post-severance health insurance coverage & cost | 1 | 1 | Yes | ✅ Shipped |
 | 2.3 | Sperrzeit / Ruhezeit risk indicator | 1 | 2 | No (reuses 2.1) | ✅ Shipped |
 | 2.4 | Scenario variant generator | 2 | 3 | No | ✅ Shipped |
-| 2.5 | Do-nothing baseline overlay | 2 | 3 | Yes (1 column) | Not started |
-| 2.6 | Runway sensitivity panel | 2 | 4 | No | Not started |
+| 2.5 | Do-nothing baseline overlay | 2 | 3 | Yes (1 column) | ✅ Shipped |
+| 2.6 | Runway sensitivity panel | 2 | 4 | No | ✅ Shipped |
 | 2.7 | Redundancy checklist | 3 | 5 | Yes | ✅ Shipped |
 | 2.8 | Next-year tax refund estimator | 3 | 6 | No | Not started |
 | 2.9 | Reality check-ins | 3 | 7 | Yes | Not started |

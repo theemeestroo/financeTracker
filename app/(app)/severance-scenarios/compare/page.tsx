@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { resolveScenario, computeMonthlyBurn } from "../resolve-scenario";
-import { projectRunway } from "@/lib/runway";
+import { projectRunway, projectDoNothingBaseline } from "@/lib/runway";
+import { getBaselineRunwayInputs } from "@/lib/finance/baseline-profile";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -107,6 +108,24 @@ async function ComparisonResults({ scenarios }: { scenarios: SeveranceScenario[]
   const chartData = Array.from(byDate.values()).sort((a, b) =>
     (a.date as string).localeCompare(b.date as string)
   );
+
+  // "Do-nothing" baseline overlay (DESIGN v2 §2.5) — one reference series
+  // across every scenario's own date range, same household situation
+  // regardless of which scenarios are being compared.
+  const baselineInputs = await getBaselineRunwayInputs(supabase);
+  if (baselineInputs.currentLiquidSavings != null && chartData.length > 0) {
+    const dates = chartData.map((row) => row.date as string);
+    const baselinePoints = projectDoNothingBaseline(
+      dates,
+      baselineInputs.currentLiquidSavings,
+      baselineInputs.monthlySurplus
+    );
+    const baselineByDate = new Map(baselinePoints.map((p) => [p.date, p.balance]));
+    for (const row of chartData) {
+      row["do-nothing"] = baselineByDate.get(row.date as string) ?? null;
+    }
+    series.push({ id: "do-nothing", name: "Do-nothing", color: "var(--muted-foreground)", dashed: true });
+  }
 
   return (
     <>

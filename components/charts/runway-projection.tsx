@@ -22,7 +22,14 @@ function LineItemRow({ item, sign }: { item: RunwayLineItem; sign: "+" | "−" }
 
 /** Projected-balance chart plus a click-to-select monthly income/outgoings
  *  breakdown — clicking a column pins that month's itemized cash flow below. */
-export function RunwayProjection({ runway }: { runway: RunwayResult }) {
+export function RunwayProjection({
+  runway,
+  baselineSeries,
+}: {
+  runway: RunwayResult;
+  /** "Do-nothing" reference line (DESIGN v2 §2.5) — see DepletionChart. */
+  baselineSeries?: { date: string; balance: number }[];
+}) {
   const [selectedDate, setSelectedDate] = useState<string | null>(runway.series[0]?.date ?? null);
 
   const selected = useMemo(
@@ -41,6 +48,7 @@ export function RunwayProjection({ runway }: { runway: RunwayResult }) {
         depletionDate={runway.depletionDate}
         selectedDate={selectedDate}
         onSelectMonth={setSelectedDate}
+        baselineSeries={baselineSeries}
       />
 
       <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
@@ -52,6 +60,12 @@ export function RunwayProjection({ runway }: { runway: RunwayResult }) {
           <span className="size-1.5 rounded-full bg-[var(--chart-3)]" aria-hidden />
           Monthly cost (left axis)
         </span>
+        {baselineSeries && (
+          <span className="flex items-center gap-1.5">
+            <span className="h-0 w-3 border-t-[1.5px] border-dashed border-muted-foreground" aria-hidden />
+            Do-nothing (today&apos;s surplus held flat)
+          </span>
+        )}
         <span>Click a column for that month&apos;s breakdown</span>
       </div>
 

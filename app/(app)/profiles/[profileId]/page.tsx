@@ -18,12 +18,13 @@ import { splitLabel } from "@/lib/finance/splits";
 import { propertiesWithSplits } from "@/lib/finance/property-splits";
 import { COMMITMENT_CATEGORIES, COMMITMENT_FREQUENCIES } from "@/lib/types";
 import type { Commitment, CommitmentSplit, HouseholdMember, Income, IncomeSplit } from "@/lib/types";
-import { updateLivingProfile } from "../actions";
+import { updateLivingProfile, updateCurrentLiquidSavings } from "../actions";
 import { CommitmentForm } from "../../commitments/commitment-form";
 import { createCommitment, deleteCommitment } from "../../commitments/actions";
 import { IncomeForm } from "../../income/income-form";
 import { createIncome, deleteIncome } from "../../income/actions";
 import { RenameProfileForm } from "./rename-profile-form";
+import { BaselineSavingsForm } from "./baseline-savings-form";
 
 const categoryLabel = (v: string) =>
   COMMITMENT_CATEGORIES.find((c) => c.value === v)?.label ?? v;
@@ -42,7 +43,7 @@ export default async function LivingProfilePage({
     await Promise.all([
       supabase
         .from("living_profiles")
-        .select("id, name, description, is_baseline")
+        .select("id, name, description, is_baseline, current_liquid_savings")
         .eq("id", profileId)
         .single(),
       supabase
@@ -130,6 +131,27 @@ export default async function LivingProfilePage({
           />
         </CardContent>
       </Card>
+
+      {profile.is_baseline && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+              Current liquid savings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              Feeds the &quot;do-nothing&quot; reference line on severance scenario charts — today&apos;s
+              savings, held flat at this household&apos;s current monthly surplus/deficit, so you can see
+              at a glance whether taking a package ever puts you behind where you&apos;d be otherwise.
+            </p>
+            <BaselineSavingsForm
+              action={updateCurrentLiquidSavings.bind(null, profileId)}
+              defaultValue={profile.current_liquid_savings}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card>

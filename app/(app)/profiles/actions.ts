@@ -209,6 +209,45 @@ export async function updateLivingProfile(
   redirect(`/profiles/${profileId}`);
 }
 
+const LiquidSavingsSchema = z.object({
+  current_liquid_savings: z.coerce.number().min(0, { message: "Must be zero or more." }),
+});
+
+/** Baseline-only (DESIGN v2 §2.5) — seeds the "do-nothing" overlay's
+ *  starting balance. Not gated server-side on is_baseline since RLS already
+ *  scopes the row to its owner and a non-baseline profile setting this is
+ *  harmless (just unused — nothing reads it off a non-baseline row). */
+export async function updateCurrentLiquidSavings(
+  profileId: string,
+  _prevState: FormState,
+  formData: FormData
+): Promise<FormState> {
+  const raw = formData.get("current_liquid_savings");
+  if (!raw) {
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from("living_profiles")
+      .update({ current_liquid_savings: null })
+      .eq("id", profileId);
+    if (error) return { error: error.message };
+    revalidatePath(`/profiles/${profileId}`);
+    return;
+  }
+
+  const validated = LiquidSavingsSchema.safeParse({ current_liquid_savings: raw });
+  if (!validated.success) return { error: validated.error.issues[0].message };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("living_profiles")
+    .update({ current_liquid_savings: validated.data.current_liquid_savings })
+    .eq("id", profileId);
+
+  if (error) return { error: error.message };
+
+  revalidatePath(`/profiles/${profileId}`);
+}
+
 export async function deleteLivingProfile(profileId: string) {
   const supabase = await createClient();
   // RLS + the is_baseline check together prevent deleting the baseline profile.

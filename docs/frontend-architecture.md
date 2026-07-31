@@ -17,7 +17,7 @@ All routes live under `app/(app)/` (the authenticated shell) except `/login` and
 
 | Route | File | Purpose |
 |---|---|---|
-| `/` | `page.tsx` | Dashboard: active commitments/income, category breakdown, historical trend, owner filter (`?owner=`); renders `SurplusTile`, `CategoryBreakdownChart`, `DepletionChart`. |
+| `/` | `page.tsx` | Dashboard: active commitments/income, category breakdown, income-by-type/person summary, historical trend, owner filter (`?owner=`, spending only); renders `SurplusTile`, `IncomeSummaryTile`, `CategoryBreakdownChart`, `DepletionChart`. |
 | `/commitments` | `commitments/page.tsx` | Commitments list for the baseline profile, grouped/collapsible table, CSV export link. |
 | `/commitments/new` | `commitments/new/page.tsx` | Create form. |
 | `/commitments/[id]/edit` | `commitments/[id]/edit/page.tsx` | Edit form; `notFound()` if missing. |
@@ -31,14 +31,14 @@ All routes live under `app/(app)/` (the authenticated shell) except `/login` and
 | `/household/[id]/edit` | `household/[id]/edit/page.tsx` | Edit a member's personal/insurance fields. |
 | `/household/[id]/tax-profile` | `household/[id]/tax-profile/page.tsx` | Upsert a member's `tax_profiles` row. |
 | `/profiles` | `profiles/page.tsx` | Living Profiles list with aggregated commitments/income/net income per profile. |
-| `/profiles/[profileId]` | `profiles/[profileId]/page.tsx` | Single profile's commitments + income tables, inline create forms, rename. |
+| `/profiles/[profileId]` | `profiles/[profileId]/page.tsx` | Single profile's commitments + income tables, inline create forms, rename. Baseline profile only: a "Current liquid savings" card (`baseline-savings-form.tsx`) feeding the do-nothing overlay (DESIGN v2 §2.5). |
 | `/properties` | `properties/page.tsx` | Properties list for the baseline profile with linked commitments. |
 | `/properties/new` | `properties/new/page.tsx` | Create form. |
 | `/properties/[id]` | `properties/[id]/page.tsx` | Property detail: linked commitments, ownership splits. |
 | `/properties/[id]/edit` | `properties/[id]/edit/page.tsx` | Edit form. |
 | `/severance-scenarios` | `severance-scenarios/page.tsx` | Scenario list with a resolved runway preview per scenario. |
 | `/severance-scenarios/new` | `severance-scenarios/new/page.tsx` | Create form. |
-| `/severance-scenarios/[id]` | `severance-scenarios/[id]/page.tsx` | The scenario workspace — packages, phases, events, property-ends, checklist, variant generator, runway chart, tabbed (Overview / Cash Flow / Timeline / Checklist). The largest page in the app. |
+| `/severance-scenarios/[id]` | `severance-scenarios/[id]/page.tsx` | The scenario workspace — packages, phases, events, property-ends, checklist, variant generator, runway chart, tabbed (Overview / Cash Flow / Spend Analysis / Timeline / Checklist). Cash Flow has the do-nothing overlay (DESIGN v2 §2.5) on the projected-balance chart. Spend Analysis is the "Runway sensitivity" ranked list (§2.6) — each row (`sensitivity-entry.tsx`, client, starts collapsed) expands to the individual commitments behind that category's saving and a plain-language depletion-date effect. The largest page in the app. |
 | `/severance-scenarios/[id]/edit` | `severance-scenarios/[id]/edit/page.tsx` | Edit scenario basics (name, starting balance, notes). |
 | `/severance-scenarios/[id]/packages/[packageId]/edit` | `.../packages/[packageId]/edit/page.tsx` | Edit one severance package. |
 | `/severance-scenarios/compare` | `severance-scenarios/compare/page.tsx` | Side-by-side runway comparison via `?ids=`, `ComparisonChart` + `ScenarioPicker`. |
@@ -66,17 +66,18 @@ All routes live under `app/(app)/` (the authenticated shell) except `/login` and
 
 **`components/charts/*.tsx` — chart widgets** (Recharts-based, all client except `surplus-tile.tsx`)
 - `category-breakdown-chart.tsx` — bar chart of commitment spend by category (dashboard).
-- `comparison-chart.tsx` — multi-series line chart comparing several scenarios' runway projections (`/severance-scenarios/compare`).
-- `depletion-chart.tsx` — composed area/bar chart of one scenario's balance over time; supports a click-to-select month (see `runway-projection.tsx`) and a highlighted current-period column.
-- `runway-projection.tsx` — wraps `DepletionChart` plus a per-month itemized income/outgoings breakdown panel (segmented bar + line items) for the selected month.
+- `comparison-chart.tsx` — multi-series line chart comparing several scenarios' runway projections (`/severance-scenarios/compare`); an optional per-series `dashed` flag renders the do-nothing baseline (DESIGN v2 §2.5) as a muted dashed reference line instead of another scenario.
+- `depletion-chart.tsx` — composed area/bar chart of one scenario's balance over time; supports a click-to-select month (see `runway-projection.tsx`), a highlighted current-period column, and an optional `baselineSeries` prop overlaying the do-nothing reference line (dashed, `--muted-foreground`).
+- `runway-projection.tsx` — wraps `DepletionChart` plus a per-month itemized income/outgoings breakdown panel (segmented bar + line items) for the selected month; passes through `baselineSeries` and adds its legend entry.
 - `surplus-tile.tsx` — server; stat tile showing monthly income − commitments with an up/down status indicator (dashboard).
+- `income-summary-tile.tsx` — server; net monthly income total + a by-IncomeType segmented bar/dot legend (fixed categorical hue order — `--series-1..4`) + a by-person line, shown only when 2+ people actually have income (dashboard, alongside `SurplusTile`). Not owner-filter-scoped — always whole-household, unlike the category breakdown below it.
 
 ## Client vs. Server component split
 
 - **Pages (`page.tsx`) are Server Components** almost everywhere — they call `createClient()` from `lib/supabase/server.ts`, run Supabase queries directly in the component body (often `Promise.all`-batched), and pass server-action references (e.g. `updateIncome.bind(null, id)`) straight into client form components as the `action` prop. `notFound()` handles missing single-record lookups.
 - **Forms are separate `"use client"` files** (`commitment-form.tsx`, `income-form.tsx`, `household-member-form.tsx`, `tax-profile-form.tsx`, `property-form.tsx`, `package-form.tsx`, `phase-form.tsx`, `event-form.tsx`, `property-end-form.tsx`, `checklist-item-form.tsx`, `variant-generator-form.tsx`, `new-profile-form.tsx`, and similar) — they hold local state/validation and call the server action passed in as a prop, keeping the parent page itself server-rendered.
 - **Small interactive widgets are isolated client components**: `DeleteButton`, `ChecklistItemCheckbox`, `CollapsibleTableGroup`, the dashboard's owner filter, the properties page's property switcher, the compare page's scenario picker, and every chart component (Recharts requires the client).
-- **Presentational-only leaf components stay server** where no interactivity is needed: `CurrencyAmount`, `SurplusTile`.
+- **Presentational-only leaf components stay server** where no interactivity is needed: `CurrencyAmount`, `SurplusTile`, `IncomeSummaryTile`.
 - Design-system primitives in `components/ui/` are client wherever they wrap an interactive `@base-ui/react` primitive (dialog, popover, select, sheet, tabs, tooltip, calendar, date-picker, checkbox) and unmarked/server where purely presentational (badge, card, skeleton).
 
 When adding a new page, follow the existing pattern: keep the `page.tsx` a Server Component, put any form in its own `"use client"` file bound to a server action, and only reach for a client wrapper around the whole page if the page needs shared interactive state across multiple sections (see `components/charts/runway-projection.tsx` for that pattern).

@@ -43,6 +43,7 @@ A named household budget "scenario" of ongoing living costs/income (e.g. "Curren
 | `name` | text | not null | — | |
 | `description` | text | nullable | — | |
 | `is_baseline` | boolean | not null | `false` | |
+| `current_liquid_savings` | numeric(10,2) | nullable | — | Only meaningful on the baseline row — seeds the "do-nothing" overlay (DESIGN v2 §2.5) on severance scenario charts. Null until the household sets it, in which case the overlay is simply not shown. |
 | `created_at` | timestamptz | not null | `now()` | |
 
 Indexes: `living_profiles_user_id_idx (user_id)`; unique partial index `living_profiles_one_baseline_per_user on (user_id) where is_baseline` — exactly one baseline profile per user.

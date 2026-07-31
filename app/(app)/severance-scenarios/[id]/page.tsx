@@ -13,6 +13,7 @@ import {
   Plus,
   Receipt,
   Route,
+  Scissors,
   ShieldCheck,
   Sparkles,
   TrendingUp,
@@ -21,7 +22,8 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { resolveScenario } from "../resolve-scenario";
-import { projectRunway } from "@/lib/runway";
+import { projectRunway, projectDoNothingBaseline, sensitivityAnalysis } from "@/lib/runway";
+import { getBaselineRunwayInputs } from "@/lib/finance/baseline-profile";
 import { pensionWartezeitTimeline } from "@/lib/severance";
 import { addScenarioEvent, deleteScenarioEvent } from "../event-actions";
 import { addScenarioPhase, deleteScenarioPhase } from "../phase-actions";
@@ -35,6 +37,7 @@ import { PackageForm } from "../package-form";
 import { PropertyEndForm } from "../property-end-form";
 import { VariantGeneratorForm } from "../variant-generator-form";
 import { ChecklistItemForm } from "../checklist-item-form";
+import { SensitivityEntryRow } from "../sensitivity-entry";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -206,6 +209,24 @@ export default async function ScenarioDetailPage({
   const { runwayScenario, packageSummaries } = await resolveScenario(supabase, typedScenario);
   const runway = runwayScenario ? projectRunway(runwayScenario) : null;
 
+  // "Do-nothing" baseline overlay (DESIGN v2 §2.5) — the household's own
+  // current situation, independent of this (or any) scenario; only shown
+  // once current_liquid_savings is set on the baseline living profile.
+  const baselineInputs = await getBaselineRunwayInputs(supabase);
+  const baselineSeries =
+    runway && baselineInputs.currentLiquidSavings != null
+      ? projectDoNothingBaseline(
+          runway.series.map((p) => p.date),
+          baselineInputs.currentLiquidSavings,
+          baselineInputs.monthlySurplus
+        )
+      : undefined;
+
+  // Runway sensitivity panel (DESIGN v2 §2.6) — [] when the scenario is
+  // already sustainable within the horizon, same "nothing to add" reasoning
+  // sensitivityAnalysis documents itself.
+  const sensitivity = runwayScenario ? sensitivityAnalysis(runwayScenario) : [];
+
   const totalPackageGross = packageSummaries.reduce(
     (sum, s) => sum + s.severanceGross + s.noticePayGross,
     0
@@ -297,6 +318,10 @@ export default async function ScenarioDetailPage({
                 <TabsTab value="cashflow">
                   <LineChart className="size-4" />
                   Cash Flow
+                </TabsTab>
+                <TabsTab value="spendanalysis">
+                  <Scissors className="size-4" />
+                  Spend Analysis
                 </TabsTab>
                 <TabsTab value="timeline">
                   <Route className="size-4" />
@@ -537,7 +562,17 @@ export default async function ScenarioDetailPage({
                       Add a severance package to see the projection.
                     </p>
                   ) : (
-                    <RunwayProjection runway={runway} />
+                    <>
+                      <RunwayProjection runway={runway} baselineSeries={baselineSeries} />
+                      {!baselineSeries && (
+                        <p className="mt-4 text-xs text-muted-foreground">
+                          <Link href="/profiles" className="underline underline-offset-2">
+                            Set your current liquid savings
+                          </Link>{" "}
+                          on the baseline profile to overlay a &quot;do-nothing&quot; reference line.
+                        </p>
+                      )}
+                    </>
                   )}
                 </CardContent>
               </Card>
@@ -623,6 +658,37 @@ export default async function ScenarioDetailPage({
                       })}
                     </TableBody>
                   </Table>
+                </CardContent>
+              </Card>
+            </TabsPanel>
+
+            {/* Spend Analysis — "if you cut X, how much longer does this last?" */}
+            <TabsPanel value="spendanalysis">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    <TitleIcon icon={Sparkles} accent="var(--series-4)" />
+                    Runway sensitivity
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {sensitivity.length === 0 ? (
+                    <p className="py-10 text-center text-sm text-muted-foreground">
+                      {runway
+                        ? "This scenario is already sustainable within the projection horizon — nothing to cut."
+                        : "Add a severance package to see the projection."}
+                    </p>
+                  ) : (
+                    <>
+                      <p className="mb-2 text-sm text-muted-foreground">
+                        If you cut a discretionary category entirely, starting now — expand a row for the
+                        individual commitments and the effect on the depletion date:
+                      </p>
+                      {sensitivity.map((entry) => (
+                        <SensitivityEntryRow key={entry.category} entry={entry} />
+                      ))}
+                    </>
+                  )}
                 </CardContent>
               </Card>
             </TabsPanel>

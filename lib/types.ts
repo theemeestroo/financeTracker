@@ -230,6 +230,9 @@ export type LivingProfile = {
   name: string;
   description: string | null;
   is_baseline: boolean;
+  /** Only meaningful on the baseline row — seeds the "do-nothing" overlay
+   *  (DESIGN v2 §2.5), null until the household sets it. */
+  current_liquid_savings: number | null;
 };
 
 /** The household-level shell — a scenario holds one or more SeveranceScenarioPackages,

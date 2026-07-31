@@ -1,11 +1,13 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   Area,
   Bar,
   CartesianGrid,
   Cell,
   ComposedChart,
+  Line,
   ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
@@ -17,13 +19,15 @@ import { formatEUR } from "@/lib/finance/frequency";
 import { formatMonthDisplay } from "@/lib/finance/date-utils";
 import type { RunwayPoint } from "@/lib/runway";
 
+type ChartPoint = RunwayPoint & { baselineBalance?: number | null };
+
 function ChartTooltip({
   active,
   payload,
   label,
 }: {
   active?: boolean;
-  payload?: { payload: RunwayPoint }[];
+  payload?: { payload: ChartPoint }[];
   label?: string;
 }) {
   if (!active || !payload?.length) return null;
@@ -39,6 +43,11 @@ function ChartTooltip({
           Monthly cost: {formatEUR(point.monthlyCost)}
         </div>
       )}
+      {point.baselineBalance != null && (
+        <div className="tabular-nums text-muted-foreground">
+          Do-nothing: {formatEUR(point.baselineBalance)}
+        </div>
+      )}
     </div>
   );
 }
@@ -48,6 +57,7 @@ export function DepletionChart({
   depletionDate,
   selectedDate,
   onSelectMonth,
+  baselineSeries,
 }: {
   series: RunwayPoint[];
   depletionDate: string | null;
@@ -55,15 +65,26 @@ export function DepletionChart({
   selectedDate?: string | null;
   /** Fired with a point's date when its column/area is clicked. */
   onSelectMonth?: (date: string) => void;
+  /** "Do-nothing" reference line (DESIGN v2 §2.5) — today's household
+   *  surplus/deficit held flat from a starting balance, same date range as
+   *  `series`. Omit to hide the overlay (e.g. no current_liquid_savings
+   *  figure set on the baseline profile yet). */
+  baselineSeries?: { date: string; balance: number }[];
 }) {
   const depletionPoint = depletionDate ? series.find((p) => p.date === depletionDate) : undefined;
   const showCost = series.some((p) => p.monthlyCost != null);
   const gradientId = "depletion-fill";
 
+  const chartData: ChartPoint[] = useMemo(() => {
+    if (!baselineSeries) return series;
+    const baselineByDate = new Map(baselineSeries.map((p) => [p.date, p.balance]));
+    return series.map((p) => ({ ...p, baselineBalance: baselineByDate.get(p.date) ?? null }));
+  }, [series, baselineSeries]);
+
   return (
     <ResponsiveContainer width="100%" height={280}>
       <ComposedChart
-        data={series}
+        data={chartData}
         margin={{ top: 8, right: 16, bottom: 0, left: 8 }}
         className={onSelectMonth ? "cursor-pointer" : undefined}
         onClick={(state) => {
@@ -143,6 +164,20 @@ export function DepletionChart({
           dot={false}
           isAnimationActive={false}
         />
+        {baselineSeries && (
+          <Line
+            yAxisId="balance"
+            type="monotone"
+            dataKey="baselineBalance"
+            name="Do-nothing"
+            stroke="var(--muted-foreground)"
+            strokeWidth={1.5}
+            strokeDasharray="4 4"
+            dot={false}
+            connectNulls
+            isAnimationActive={false}
+          />
+        )}
         {depletionPoint && (
           <ReferenceDot
             yAxisId="balance"

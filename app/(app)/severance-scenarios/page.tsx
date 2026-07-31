@@ -8,7 +8,47 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatEUR } from "@/lib/finance/frequency";
 import { formatDateDisplay } from "@/lib/finance/date-utils";
-import type { HouseholdMember, SeveranceScenario } from "@/lib/types";
+import type { HouseholdMember, SeveranceScenario, SeveranceScenarioPackage } from "@/lib/types";
+
+/**
+ * Compact tags summarizing what's actually baked into a scenario's
+ * package(s) — multiplier (or "Override" if a manual figure replaced the
+ * formula), which pay components are folded into the calc base, and
+ * garden leave — so the list page reads as more than just a name and a
+ * total. Multiple packages (one per severed household member) collapse to
+ * a single tag set via "any package has this" rather than one row per
+ * person, since scenarios almost always size everyone the same way.
+ */
+function summarizeScope(packages: SeveranceScenarioPackage[]): string[] {
+  const formulaMultipliers = packages
+    .filter((p) => p.gross_severance_override == null)
+    .map((p) => p.severance_multiplier);
+  const anyOverridden = packages.some((p) => p.gross_severance_override != null);
+  const multiplierTag =
+    formulaMultipliers.length === 0
+      ? null
+      : Math.min(...formulaMultipliers) === Math.max(...formulaMultipliers)
+        ? `${formulaMultipliers[0]}×`
+        : `${Math.min(...formulaMultipliers)}×–${Math.max(...formulaMultipliers)}×`;
+
+  const gardenLeavePackages = packages.filter((p) => p.include_garden_leave);
+  const noticeMonths = gardenLeavePackages.map((p) => p.notice_period_months ?? 0);
+  const gardenLeaveTag =
+    gardenLeavePackages.length === 0
+      ? null
+      : noticeMonths.every((m) => m === noticeMonths[0])
+        ? `Garden leave (${noticeMonths[0]}mo)`
+        : "Garden leave";
+
+  return [
+    ...(multiplierTag ? [multiplierTag] : []),
+    ...(anyOverridden ? ["Override"] : []),
+    ...(packages.some((p) => p.include_bonus_in_calc) ? ["+ Bonus"] : []),
+    ...(packages.some((p) => p.include_christmas_bonus_in_calc) ? ["+ Xmas money"] : []),
+    ...(packages.some((p) => p.include_car_in_calc) ? ["+ Car"] : []),
+    ...(gardenLeaveTag ? [gardenLeaveTag] : []),
+  ];
+}
 
 export default async function SeveranceScenariosPage() {
   const supabase = await createClient();
@@ -40,7 +80,8 @@ export default async function SeveranceScenariosPage() {
       const memberNames = packageSummaries
         .map((s) => memberById.get(s.package.household_member_id) ?? "—")
         .join(", ");
-      return { scenario, packageSummaries, runway, earliestStart, totalGross, totalNet, memberNames };
+      const scopeTags = summarizeScope(packageSummaries.map((s) => s.package));
+      return { scenario, packageSummaries, runway, earliestStart, totalGross, totalNet, memberNames, scopeTags };
     })
   );
 
@@ -81,7 +122,7 @@ export default async function SeveranceScenariosPage() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {previews.map(({ scenario, runway, earliestStart, totalGross, totalNet, memberNames }) => (
+          {previews.map(({ scenario, runway, earliestStart, totalGross, totalNet, memberNames, scopeTags }) => (
             <Link key={scenario.id} href={`/severance-scenarios/${scenario.id}`}>
               <Card className="transition-colors hover:bg-muted/50">
                 <CardHeader>
@@ -92,6 +133,15 @@ export default async function SeveranceScenariosPage() {
                     {memberNames || "No packages yet"} · starts{" "}
                     {earliestStart ? formatDateDisplay(earliestStart) : "—"}
                   </div>
+                  {scopeTags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {scopeTags.map((tag) => (
+                        <Badge key={tag} variant="outline" className="text-xs font-normal">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <span className="text-muted-foreground">Net severance</span>
                     <span className="font-semibold tabular-nums">

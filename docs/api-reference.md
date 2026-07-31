@@ -34,7 +34,7 @@ Every file below starts with `"use server"`. Each function is called directly as
 | `app/(app)/income/actions.ts` | `createIncome`, `updateIncome`, `deleteIncome` | `income`, `income_splits` |
 | `app/(app)/commitments/actions.ts` | `createCommitment`, `updateCommitment`, `deleteCommitment` | `commitments`, `commitment_splits` |
 | `app/(app)/properties/actions.ts` | `createProperty`, `updateProperty`, `deleteProperty` | `properties`, `property_splits` |
-| `app/(app)/profiles/actions.ts` | `createLivingProfile`, `cloneLivingProfile`, `updateLivingProfile`, `deleteLivingProfile` | `living_profiles` (clone also duplicates the source profile's `commitments`/`income`) |
+| `app/(app)/profiles/actions.ts` | `createLivingProfile`, `cloneLivingProfile`, `updateLivingProfile`, `deleteLivingProfile`, `updateCurrentLiquidSavings` | `living_profiles` (clone also duplicates the source profile's `commitments`/`income`; `updateCurrentLiquidSavings` is baseline-only in intent — DESIGN v2 §2.5 — though not server-enforced since RLS already scopes to the owner and setting it on a non-baseline row is simply unused) |
 | `app/(app)/severance-scenarios/actions.ts` | `createScenario`, `updateScenario`, `deleteScenario` | `severance_scenarios` |
 | `app/(app)/severance-scenarios/package-actions.ts` | `addScenarioPackage`, `updateScenarioPackage`, `deleteScenarioPackage` | `severance_scenario_packages` |
 | `app/(app)/severance-scenarios/phase-actions.ts` | `addScenarioPhase`, `deleteScenarioPhase` | `severance_scenario_phases` |

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SurplusTile } from "@/components/charts/surplus-tile";
+import { IncomeSummaryTile } from "@/components/charts/income-summary-tile";
 import { CategoryBreakdownChart } from "@/components/charts/category-breakdown-chart";
 import { DepletionChart } from "@/components/charts/depletion-chart";
 import { OwnerFilter } from "./owner-filter";
@@ -11,6 +12,7 @@ import {
   activeCommitments,
   activeIncome,
   categoryBreakdown,
+  incomeSummary,
   todayISO,
   totalMonthlyCommitments,
   totalMonthlyNetIncome,
@@ -143,6 +145,13 @@ export default async function OverviewPage({
     taxProfileByMember,
     year
   );
+  const incomeByTypeAndPerson = incomeSummary(
+    activeInc,
+    splitsByIncome,
+    taxProfileByMember,
+    memberById,
+    year
+  );
 
   const isMemberScoped = !!owner && owner !== "all" && owner !== "household";
   const scopedCommitments =
@@ -191,6 +200,11 @@ export default async function OverviewPage({
           label="Monthly surplus / deficit (net)"
           monthlyIncome={monthlyNetIncome}
           monthlyCommitments={monthlyCommitments}
+        />
+        <IncomeSummaryTile
+          total={incomeByTypeAndPerson.total}
+          byType={incomeByTypeAndPerson.byType}
+          byPerson={incomeByTypeAndPerson.byPerson}
         />
       </div>
 

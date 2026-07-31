@@ -1,12 +1,15 @@
 import { toMonthlyEquivalent } from "./frequency";
 import { isActiveOn } from "./date-utils";
-import { incomeGrossBreakdown, incomeNetBreakdownForRow } from "./income-gross";
+import { incomeGrossBreakdown, incomeNetBreakdownForRow, incomeBreakdownPerSplit } from "./income-gross";
 import type { Split } from "./splits";
 import {
   COMMITMENT_CATEGORIES,
+  INCOME_TYPES,
   type Commitment,
   type CommitmentCategory,
+  type HouseholdMember,
   type Income,
+  type IncomeType,
   type TaxProfile,
 } from "@/lib/types";
 
@@ -97,6 +100,80 @@ export function categoryBreakdown(
   }))
     .filter((entry) => entry.monthly > 0)
     .sort((a, b) => b.monthly - a.monthly);
+}
+
+export type IncomeTypeBreakdownEntry = {
+  type: IncomeType;
+  label: string;
+  monthly: number;
+};
+
+export type IncomePersonBreakdownEntry = {
+  householdMemberId: string;
+  name: string;
+  monthly: number;
+};
+
+export type IncomeSummary = {
+  /** Matches totalMonthlyNetIncome's netMonthly for the same inputs. */
+  total: number;
+  /** Fixed IncomeType declaration order, not sorted-by-size — a type's
+   *  color mapping in the UI (one of the four categorical series hues)
+   *  stays stable across renders/reloads. */
+  byType: IncomeTypeBreakdownEntry[];
+  /** Sorted descending. Left to the caller to decide whether a single
+   *  earner makes this worth rendering at all. */
+  byPerson: IncomePersonBreakdownEntry[];
+};
+
+/**
+ * Net-monthly income summarized by IncomeType and by household member in
+ * one pass, via lib/finance/income-gross.ts's `incomeBreakdownPerSplit`.
+ * Same net-only convention as totalMonthlyNetIncome above: a split share
+ * with no tax profile yet, or a whole unattributed (zero-split) row,
+ * contributes 0 rather than an unlabeled gross approximation — there's no
+ * one to tax, and no one to attribute the amount to in `byPerson` either.
+ */
+export function incomeSummary(
+  income: Income[],
+  splitsByIncome: Map<string, Split[]>,
+  taxProfileByMember: Map<string, TaxProfile>,
+  memberById: Map<string, HouseholdMember>,
+  year: number
+): IncomeSummary {
+  const byType = new Map<IncomeType, number>();
+  const byPerson = new Map<string, number>();
+  let total = 0;
+
+  for (const i of income) {
+    const shares = incomeBreakdownPerSplit(i, splitsByIncome.get(i.id) ?? [], taxProfileByMember, year);
+    for (const share of shares) {
+      if (!share.net) continue;
+      const amount = share.net.recurringMonthlyNet;
+      total += amount;
+      byType.set(i.type, (byType.get(i.type) ?? 0) + amount);
+      if (share.householdMemberId) {
+        byPerson.set(share.householdMemberId, (byPerson.get(share.householdMemberId) ?? 0) + amount);
+      }
+    }
+  }
+
+  return {
+    total,
+    byType: INCOME_TYPES.map((t) => ({
+      type: t.value,
+      label: t.label,
+      monthly: byType.get(t.value) ?? 0,
+    })).filter((entry) => entry.monthly > 0),
+    byPerson: Array.from(byPerson.entries())
+      .map(([householdMemberId, monthly]) => ({
+        householdMemberId,
+        name: memberById.get(householdMemberId)?.name ?? "—",
+        monthly,
+      }))
+      .filter((entry) => entry.monthly > 0)
+      .sort((a, b) => b.monthly - a.monthly),
+  };
 }
 
 export function todayISO(): string {

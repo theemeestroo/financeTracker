@@ -17,6 +17,9 @@ export type ComparisonSeries = {
   id: string;
   name: string;
   color: string;
+  /** Dashed stroke — the "do-nothing" baseline overlay (DESIGN v2 §2.5)
+   *  uses this to read as a reference line, not another scenario. */
+  dashed?: boolean;
 };
 
 function ChartTooltip({
@@ -63,16 +66,27 @@ function ChartTooltip({
 function DotLegend({ series }: { series: ComparisonSeries[] }) {
   return (
     <ul className="mb-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5">
-      {series.map((s) => (
-        <li key={s.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span
-            className="inline-block size-2.5 shrink-0 rounded-full"
-            style={{ backgroundColor: s.color }}
-            aria-hidden
-          />
-          {s.name}
-        </li>
-      ))}
+      {series.map((s) =>
+        s.dashed ? (
+          <li key={s.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span
+              className="h-0 w-3 shrink-0 border-t-[1.5px] border-dashed"
+              style={{ borderColor: s.color }}
+              aria-hidden
+            />
+            {s.name}
+          </li>
+        ) : (
+          <li key={s.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span
+              className="inline-block size-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: s.color }}
+              aria-hidden
+            />
+            {s.name}
+          </li>
+        )
+      )}
     </ul>
   );
 }
@@ -114,7 +128,8 @@ export function ComparisonChart({
               dataKey={s.id}
               name={s.name}
               stroke={s.color}
-              strokeWidth={2.5}
+              strokeWidth={s.dashed ? 1.5 : 2.5}
+              strokeDasharray={s.dashed ? "4 4" : undefined}
               dot={false}
               connectNulls
               isAnimationActive={false}
