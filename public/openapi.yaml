@@ -1,0 +1,139 @@
+openapi: 3.1.0
+info:
+  title: Runaway — Data Export API
+  version: "1.0.0"
+  description: >-
+    Runaway is a household finance planning app. It has no general-purpose
+    REST API — almost every read/write in the product goes through Next.js
+    Server Actions, an internal RPC mechanism invoked directly from the
+    app's own forms and reachable only from its own UI (no stable URL, no
+    versioning, not meant for external callers). The full list of Server
+    Actions is documented in the app's own Help Centre, under "API
+    Reference", for transparency — they are intentionally not represented
+    as paths in this document, since encoding them as REST-style endpoints
+    here would misrepresent how they actually work.
+
+
+    The two paths below are this app's only genuine HTTP endpoints: signed-in,
+    GET-only CSV exports of the household's own data. Both require a valid
+    Supabase Auth session (the same session the app's own UI uses after
+    signing in at `/login`) and return every row belonging to the
+    signed-in user's baseline Living Profile.
+  contact:
+    name: Runaway Help Centre
+    url: /help
+externalDocs:
+  description: In-app Help Centre — API Reference section (Server Actions list, concepts, disclaimers)
+  url: /help
+servers:
+  - url: /
+    description: This app's own origin (relative — resolve against wherever it's deployed)
+security:
+  - supabaseSessionCookie: []
+tags:
+  - name: Exports
+    description: CSV data exports of the signed-in household's own records.
+paths:
+  /commitments/export:
+    get:
+      operationId: exportCommitments
+      summary: Export commitments as CSV
+      description: >-
+        Streams every commitment on the signed-in household's baseline
+        Living Profile as a CSV file, one row per commitment, sorted by
+        name. Split ownership is rendered as a human-readable label (e.g.
+        "Household", "Alice", or "Alice 60% · Bob 40%"), not raw
+        percentages.
+      tags: [Exports]
+      responses:
+        "200":
+          description: CSV file, one row per commitment.
+          headers:
+            Content-Disposition:
+              description: Suggested filename, e.g. `commitments-2026-08-02.csv`.
+              schema:
+                type: string
+                example: attachment; filename="commitments-2026-08-02.csv"
+          content:
+            text/csv:
+              schema:
+                $ref: "#/components/schemas/CommitmentsCsv"
+              example: |-
+                Name,Category,Amount (EUR),Frequency,Essential,Linked to,Start date,End date
+                Rent,Housing,1800,Monthly,Yes,Household,2024-01-01,
+                Broadband,Utilities,45,Monthly,No,Household,2024-01-01,
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /income/export:
+    get:
+      operationId: exportIncome
+      summary: Export income rows as CSV
+      description: >-
+        Streams every income row on the signed-in household's baseline
+        Living Profile as a CSV file, one row per income source, sorted by
+        name. Columns specific to one income type (salary compensation
+        detail, rental overhead %) are blank on rows of a different type.
+      tags: [Exports]
+      responses:
+        "200":
+          description: CSV file, one row per income source.
+          headers:
+            Content-Disposition:
+              description: Suggested filename, e.g. `income-2026-08-02.csv`.
+              schema:
+                type: string
+                example: attachment; filename="income-2026-08-02.csv"
+          content:
+            text/csv:
+              schema:
+                $ref: "#/components/schemas/IncomeCsv"
+              example: |-
+                Name,Linked to,Type,Gross amount,Currency,Exchange rate (1 unit = ? EUR),Frequency,Start date,End date,Christmas bonus (% of 1mo),Holiday pay (% of 1mo),Annual bonus (EUR),Bonus payout,Car allowance (EUR/yr, reference only),Pension contribution (EUR/mo, reference only),Company car cost (EUR/mo, deducted from net),Rental overhead (%, reduces gross/net)
+                Salary,You,Salary,6500,EUR,,Monthly,2020-01-01,,100,50,5000,One-time payment per year,6000,300,150,
+                Rental income,You,Rental,1200,EUR,,Monthly,2021-06-01,,,,,,,,,15
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+components:
+  securitySchemes:
+    supabaseSessionCookie:
+      type: apiKey
+      in: cookie
+      name: sb-access-token
+      description: >-
+        Session cookie issued by Supabase Auth after signing in through
+        this app's own `/login` page. There is no separate API key — both
+        routes check `supabase.auth.getUser()` against this cookie and
+        respond 401 if it's missing or expired. Rows are always scoped to
+        that authenticated user's own household (Row Level Security), so
+        there is no way to request another user's data even with a valid
+        session.
+  responses:
+    Unauthorized:
+      description: No valid Supabase session.
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: Unauthorized
+  schemas:
+    CommitmentsCsv:
+      type: string
+      format: binary
+      description: >-
+        `text/csv`, UTF-8, comma-delimited, one header row. Columns: Name,
+        Category, Amount (EUR), Frequency (Monthly/Quarterly/Annual/One-off),
+        Essential (Yes/No), Linked to, Start date, End date (ISO 8601 dates;
+        End date blank when ongoing).
+    IncomeCsv:
+      type: string
+      format: binary
+      description: >-
+        `text/csv`, UTF-8, comma-delimited, one header row. Columns: Name,
+        Linked to, Type (Salary/Part-time/Rental/Other), Gross amount,
+        Currency, Exchange rate (1 unit = ? EUR — blank for EUR rows),
+        Frequency, Start date, End date, Christmas bonus (% of 1mo, salary
+        only), Holiday pay (% of 1mo, salary only), Annual bonus (EUR,
+        salary only), Bonus payout (salary only), Car allowance (EUR/yr,
+        reference only, salary only), Pension contribution (EUR/mo,
+        reference only, salary only), Company car cost (EUR/mo, deducted
+        from net, salary only), Rental overhead (%, rental only).

@@ -11,6 +11,7 @@ const HouseholdMemberSchema = z.object({
   statutory_health_insurance: z.boolean(),
   health_insurance_addon_rate: z.string().optional(),
   private_health_insurance_monthly_premium: z.coerce.number().min(0).optional(),
+  count_private_health_insurance_as_outgoing: z.boolean(),
 });
 
 export type FormState = { error?: string } | undefined;
@@ -23,6 +24,8 @@ function parseHouseholdMemberForm(formData: FormData) {
     health_insurance_addon_rate: formData.get("health_insurance_addon_rate") || undefined,
     private_health_insurance_monthly_premium:
       formData.get("private_health_insurance_monthly_premium") || undefined,
+    count_private_health_insurance_as_outgoing:
+      formData.get("count_private_health_insurance_as_outgoing") === "on",
   });
 }
 
@@ -36,6 +39,7 @@ function toRow(data: z.infer<typeof HouseholdMemberSchema>) {
     private_health_insurance_monthly_premium: data.statutory_health_insurance
       ? null
       : (data.private_health_insurance_monthly_premium ?? null),
+    count_private_health_insurance_as_outgoing: data.count_private_health_insurance_as_outgoing,
   };
 }
 

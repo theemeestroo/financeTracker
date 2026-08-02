@@ -31,8 +31,8 @@ export type IncomeGrossBreakdown = {
   annualPensionContribution: number;
   /** A company car's monthly private-use cost. Unlike the other reference
    *  fields above, this one *does* reduce take-home pay — it's subtracted
-   *  straight from `recurringMonthlyNet` in `incomeNetBreakdown`, not from
-   *  gross (it's a net payroll deduction, not a taxable-income change). */
+   *  straight from `recurringMonthlyNet` in `combinedIncomeBreakdown`, not
+   *  from gross (it's a net payroll deduction, not a taxable-income change). */
   monthlyCompanyCarCost: number;
 };
 
@@ -44,9 +44,9 @@ export type IncomeGrossBreakdown = {
  * fields for `type: "salary"`), so they always fall through to the plain
  * base-pay case — except `rental`, which reduces that base by its own
  * overhead reserve (vacancy, maintenance, etc.) before it becomes the
- * recurring gross figure. Since `incomeNetBreakdown` below taxes whatever
- * `recurringMonthlyGross` comes out of here, the overhead-adjusted amount
- * is what actually gets taxed too — not the raw rent.
+ * recurring gross figure. Since `combinedIncomeBreakdown` below taxes
+ * whatever `recurringMonthlyGross` comes out of here, the overhead-adjusted
+ * amount is what actually gets taxed too — not the raw rent.
  *
  * Everything is converted to EUR first (a no-op for EUR rows, whose
  * `exchange_rate_to_eur` is always 1) — every gross/net figure and every
@@ -92,48 +92,6 @@ export type IncomeNetBreakdown = {
   oneTimeAnnualNet: number;
 };
 
-/**
- * Nets a row via the differential method: tax the recurring annual gross
- * alone, then tax recurring+bonus together, and attribute the difference
- * to the bonus. That's a better approximation of the bonus's real
- * marginal tax rate than netting it independently (German wage tax is
- * progressive — a bonus stacked on top of a salary is taxed at that
- * salary's marginal rate, not its own standalone average rate). Same
- * annual-blend simplification as the rest of lib/tax otherwise: no
- * distinct "sonstige Bezüge" withholding timing.
- */
-export function incomeNetBreakdown(
-  income: Income,
-  profile: TaxProfile,
-  year: number
-): IncomeNetBreakdown {
-  const gross = incomeGrossBreakdown(income);
-  const recurringAnnualGross = gross.recurringMonthlyGross * 12;
-  const recurringAnnualNet = calculateNetIncome(
-    recurringAnnualGross,
-    "annual",
-    profile,
-    year
-  ).netAnnual;
-  const recurringMonthlyNet = recurringAnnualNet / 12 - gross.monthlyCompanyCarCost;
-
-  if (gross.oneTimeAnnualGross <= 0) {
-    return { recurringMonthlyNet, oneTimeAnnualNet: 0 };
-  }
-
-  const totalAnnualNet = calculateNetIncome(
-    recurringAnnualGross + gross.oneTimeAnnualGross,
-    "annual",
-    profile,
-    year
-  ).netAnnual;
-
-  return {
-    recurringMonthlyNet,
-    oneTimeAnnualNet: totalAnnualNet - recurringAnnualNet,
-  };
-}
-
 /** Scales every dollar field on an income row by a factor — shared by
  *  split-share proration and currency conversion below, since both are
  *  just "multiply the money fields, leave everything else (including
@@ -163,6 +121,7 @@ function convertToEUR(income: Income): Income {
 }
 
 export type IncomeSplitBreakdown = {
+  incomeId: string;
   householdMemberId: string;
   gross: IncomeGrossBreakdown;
   /** null when this share's member has no tax profile yet (or the row is unattributed). */
@@ -170,31 +129,101 @@ export type IncomeSplitBreakdown = {
 };
 
 /**
- * The per-share view every other income calculation is built from. Zero
- * splits (household/unattributed income) is one entry covering the whole
- * row with `net: null` — there's no one to tax. One or more splits is one
- * entry per split, each scaled to its share and netted via that person's
- * own tax profile.
+ * The per-share view every other income calculation is built from — one
+ * entry per (income row × split), or one entry covering the whole row when
+ * it has no splits (household/unattributed income, `net: null` — there's
+ * no one to tax).
+ *
+ * Net is computed *per household member*, combining every row/share
+ * attributed to them into a single annual tax calculation, then
+ * apportioning the result back across their shares in proportion to each
+ * share's own gross — never by netting each row independently. That
+ * distinction matters: a second income source (e.g. rental income
+ * alongside a salary) netted on its own would get its own fresh
+ * Grundfreibetrag and low tax brackets from zero, drastically understating
+ * the tax it actually owes once stacked on top of the rest of that
+ * person's income. Apportioning by gross share is a documented
+ * simplification — the alternative (taxing sources in some order so each
+ * one lands at a literal marginal rate) would need an arbitrary ordering
+ * with no natural answer — but it still guarantees every person's shares
+ * sum to their true combined net for the year, and every row shares the
+ * same average effective rate rather than each getting its own allowance.
  */
-export function incomeBreakdownPerSplit(
-  income: Income,
-  splits: Split[],
+export function combinedIncomeBreakdown(
+  income: Income[],
+  splitsByIncome: (incomeId: string) => Split[],
   taxProfileByMember: Map<string, TaxProfile>,
   year: number
 ): IncomeSplitBreakdown[] {
-  if (splits.length === 0) {
-    return [{ householdMemberId: "", gross: incomeGrossBreakdown(income), net: null }];
+  type RawShare = { incomeId: string; householdMemberId: string; gross: IncomeGrossBreakdown };
+
+  const rawShares: RawShare[] = [];
+  for (const i of income) {
+    const splits = splitsByIncome(i.id);
+    if (splits.length === 0) {
+      rawShares.push({ incomeId: i.id, householdMemberId: "", gross: incomeGrossBreakdown(i) });
+      continue;
+    }
+    for (const s of splits) {
+      rawShares.push({
+        incomeId: i.id,
+        householdMemberId: s.household_member_id,
+        gross: incomeGrossBreakdown(scaleIncomeToShare(i, s.percentage)),
+      });
+    }
   }
 
-  return splits.map((s) => {
-    const share = scaleIncomeToShare(income, s.percentage);
-    const profile = taxProfileByMember.get(s.household_member_id);
-    return {
-      householdMemberId: s.household_member_id,
-      gross: incomeGrossBreakdown(share),
-      net: profile ? incomeNetBreakdown(share, profile, year) : null,
-    };
-  });
+  const sharesByMember = new Map<string, RawShare[]>();
+  for (const share of rawShares) {
+    if (!share.householdMemberId) continue;
+    sharesByMember.set(share.householdMemberId, [
+      ...(sharesByMember.get(share.householdMemberId) ?? []),
+      share,
+    ]);
+  }
+
+  const netByShare = new Map<RawShare, IncomeNetBreakdown>();
+  for (const [memberId, shares] of sharesByMember) {
+    const profile = taxProfileByMember.get(memberId);
+    if (!profile) continue; // every share for this member stays null below
+
+    const totalRecurringAnnualGross = shares.reduce(
+      (sum, s) => sum + s.gross.recurringMonthlyGross * 12,
+      0
+    );
+    const totalOneTimeAnnualGross = shares.reduce((sum, s) => sum + s.gross.oneTimeAnnualGross, 0);
+
+    const totalRecurringAnnualNet =
+      totalRecurringAnnualGross > 0
+        ? calculateNetIncome(totalRecurringAnnualGross, "annual", profile, year).netAnnual
+        : 0;
+    const totalOneTimeAnnualNet =
+      totalOneTimeAnnualGross > 0
+        ? calculateNetIncome(totalRecurringAnnualGross + totalOneTimeAnnualGross, "annual", profile, year)
+            .netAnnual - totalRecurringAnnualNet
+        : 0;
+
+    for (const share of shares) {
+      const recurringAnnualGross = share.gross.recurringMonthlyGross * 12;
+      const recurringFraction =
+        totalRecurringAnnualGross > 0 ? recurringAnnualGross / totalRecurringAnnualGross : 0;
+      const oneTimeFraction =
+        totalOneTimeAnnualGross > 0 ? share.gross.oneTimeAnnualGross / totalOneTimeAnnualGross : 0;
+
+      netByShare.set(share, {
+        recurringMonthlyNet:
+          (recurringFraction * totalRecurringAnnualNet) / 12 - share.gross.monthlyCompanyCarCost,
+        oneTimeAnnualNet: oneTimeFraction * totalOneTimeAnnualNet,
+      });
+    }
+  }
+
+  return rawShares.map((share) => ({
+    incomeId: share.incomeId,
+    householdMemberId: share.householdMemberId,
+    gross: share.gross,
+    net: netByShare.get(share) ?? null,
+  }));
 }
 
 /** Gross total across every share — gross doesn't need a named recipient,
@@ -224,28 +253,32 @@ export function incomeGrossBreakdownForRow(income: Income, splits: Split[]): Inc
   );
 }
 
-/** Net total across every share that has a resolvable tax profile —
- *  `missingShares` counts the rest (an unattributed row, or a named share
- *  whose member has no tax profile yet), the way `missingProfileCount`
- *  already surfaces this in the UI today. */
-export function incomeNetBreakdownForRow(
-  income: Income,
-  splits: Split[],
+/**
+ * `combinedIncomeBreakdown`'s shares, regrouped back by income row — the
+ * net total across every share with a resolvable tax profile,
+ * `missingShares` counting the rest (an unattributed row, or a named share
+ * whose member has no tax profile yet), the way `missingProfileCount`
+ * already surfaces this in the UI today.
+ */
+export function combinedNetBreakdownByRow(
+  income: Income[],
+  splitsByIncome: (incomeId: string) => Split[],
   taxProfileByMember: Map<string, TaxProfile>,
   year: number
-): { net: IncomeNetBreakdown; missingShares: number } {
-  let recurringMonthlyNet = 0;
-  let oneTimeAnnualNet = 0;
-  let missingShares = 0;
-
-  for (const share of incomeBreakdownPerSplit(income, splits, taxProfileByMember, year)) {
-    if (!share.net) {
-      missingShares += 1;
-      continue;
+): Map<string, { net: IncomeNetBreakdown; missingShares: number }> {
+  const byRow = new Map<string, { net: IncomeNetBreakdown; missingShares: number }>();
+  for (const share of combinedIncomeBreakdown(income, splitsByIncome, taxProfileByMember, year)) {
+    const entry = byRow.get(share.incomeId) ?? {
+      net: { recurringMonthlyNet: 0, oneTimeAnnualNet: 0 },
+      missingShares: 0,
+    };
+    if (share.net) {
+      entry.net.recurringMonthlyNet += share.net.recurringMonthlyNet;
+      entry.net.oneTimeAnnualNet += share.net.oneTimeAnnualNet;
+    } else {
+      entry.missingShares += 1;
     }
-    recurringMonthlyNet += share.net.recurringMonthlyNet;
-    oneTimeAnnualNet += share.net.oneTimeAnnualNet;
+    byRow.set(share.incomeId, entry);
   }
-
-  return { net: { recurringMonthlyNet, oneTimeAnnualNet }, missingShares };
+  return byRow;
 }

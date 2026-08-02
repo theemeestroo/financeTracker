@@ -1,6 +1,7 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { resolveScenario, computeMonthlyBurn } from "../resolve-scenario";
+import { resolveScenario, computeMonthlyBurn, scenarioTotals } from "../resolve-scenario";
 import { projectRunway, projectDoNothingBaseline } from "@/lib/runway";
 import { getBaselineRunwayInputs } from "@/lib/finance/baseline-profile";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ import {
 import { ComparisonChart, type ComparisonSeries } from "@/components/charts/comparison-chart";
 import { formatEUR } from "@/lib/finance/frequency";
 import { formatDateDisplay } from "@/lib/finance/date-utils";
-import type { SeveranceScenario } from "@/lib/types";
+import type { HouseholdMember, SeveranceScenario } from "@/lib/types";
 import { ScenarioPicker } from "./scenario-picker";
 
 const SERIES_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
@@ -79,15 +80,61 @@ export default async function CompareScenariosPage({
 
 async function ComparisonResults({ scenarios }: { scenarios: SeveranceScenario[] }) {
   const supabase = await createClient();
+  const { data: members } = await supabase.from("household_members").select("id, name, created_at");
+  const memberById = new Map(((members ?? []) as HouseholdMember[]).map((m) => [m.id, m.name]));
 
   const resolved = await Promise.all(
     scenarios.map(async (scenario) => {
-      const { runwayScenario } = await resolveScenario(supabase, scenario);
+      const { runwayScenario, packageSummaries } = await resolveScenario(supabase, scenario);
       const runway = runwayScenario ? projectRunway(runwayScenario) : null;
       const monthlyBurn = runwayScenario ? computeMonthlyBurn(runwayScenario) : null;
-      return { scenario, runway, monthlyBurn };
+      const totals = scenarioTotals(packageSummaries);
+      const memberNames = packageSummaries
+        .map((s) => memberById.get(s.package.household_member_id) ?? "—")
+        .join(", ");
+
+      // Extra comparison-table-only aggregates — not shared via
+      // scenarioTotals since nothing else in the app needs them.
+      const totalTaxOnSeverance = packageSummaries.every((s) => s.taxOnSeverance != null)
+        ? packageSummaries.reduce((sum, s) => sum + (s.taxOnSeverance ?? 0), 0)
+        : null;
+      const totalTaxSaving = packageSummaries.every((s) => s.taxSaving != null)
+        ? packageSummaries.reduce((sum, s) => sum + (s.taxSaving ?? 0), 0)
+        : null;
+      const totalNoticePayGross = packageSummaries.reduce((sum, s) => sum + s.noticePayGross, 0);
+      const totalPackageGross = totals.totalGrossSeverance + totalNoticePayGross;
+      const algDurations = packageSummaries.map((s) => s.algDurationMonths).filter((d) => d > 0);
+      const algDurationLabel =
+        algDurations.length === 0
+          ? null
+          : Math.min(...algDurations) === Math.max(...algDurations)
+            ? `${algDurations[0]}mo`
+            : `${Math.min(...algDurations)}–${Math.max(...algDurations)}mo`;
+      const totalHealthGapMonthly = packageSummaries.reduce((sum, s) => sum + s.healthGapMonthly, 0);
+      const totalHealthAlgMonthly = packageSummaries.reduce((sum, s) => sum + s.healthAlgMonthly, 0);
+      const anySperrzeitRisk = packageSummaries.some((s) => s.sperrzeitAtRisk);
+      const startingBalance = runwayScenario?.startingBalance ?? scenario.starting_balance;
+
+      return {
+        scenario,
+        runway,
+        monthlyBurn,
+        totals,
+        memberNames,
+        startingBalance,
+        totalTaxOnSeverance,
+        totalTaxSaving,
+        totalNoticePayGross,
+        totalPackageGross,
+        algDurationLabel,
+        totalHealthGapMonthly,
+        totalHealthAlgMonthly,
+        anySperrzeitRisk,
+      };
     })
   );
+
+  type Resolved = (typeof resolved)[number];
 
   const series: ComparisonSeries[] = resolved.map(({ scenario }, i) => ({
     id: scenario.id,
@@ -127,6 +174,84 @@ async function ComparisonResults({ scenarios }: { scenarios: SeveranceScenario[]
     series.push({ id: "do-nothing", name: "Do-nothing", color: "var(--muted-foreground)", dashed: true });
   }
 
+  // Every distinct household member covered by *any* selected scenario, in
+  // first-appearance order — the fixed set of possible per-person rows
+  // under Gross/Net severance below. A scenario that doesn't cover a given
+  // person just shows "—" in their row.
+  const allMemberIds = Array.from(
+    new Set(resolved.flatMap((r) => r.totals.severanceByMember.map((p) => p.householdMemberId)))
+  );
+  const severanceValueFor = (r: Resolved, memberId: string, field: "gross" | "net") => {
+    const share = r.totals.severanceByMember.find((p) => p.householdMemberId === memberId);
+    if (!share) return "—";
+    const value = field === "gross" ? share.gross : share.net;
+    return value != null ? formatEUR(value) : "—";
+  };
+
+  // Scenarios as columns, metrics as rows — reads more like a comparison
+  // matrix than the other way round once there's this many values, since
+  // it's usually one metric at a time ("who has the higher net severance?")
+  // that the household is scanning for, not one scenario's full profile.
+  // Every value column is right-aligned (including badges/text, not just
+  // money) so the columns stay visually in line with each other.
+  const rows: { label: string; sub?: boolean; render: (r: Resolved) => ReactNode }[] = [
+    { label: "People", render: (r) => r.memberNames || "—" },
+    { label: "Starts", render: (r) => (r.totals.earliestStart ? formatDateDisplay(r.totals.earliestStart) : "—") },
+    { label: "Starting balance", render: (r) => formatEUR(r.startingBalance) },
+    { label: "Gross severance", render: (r) => formatEUR(r.totals.totalGrossSeverance) },
+    ...allMemberIds.map((id) => ({
+      label: memberById.get(id) ?? "—",
+      sub: true,
+      render: (r: Resolved) => severanceValueFor(r, id, "gross"),
+    })),
+    { label: "Tax on severance", render: (r) => (r.totalTaxOnSeverance != null ? formatEUR(r.totalTaxOnSeverance) : "—") },
+    { label: "Net severance", render: (r) => (r.totals.totalNetSeverance != null ? formatEUR(r.totals.totalNetSeverance) : "—") },
+    ...allMemberIds.map((id) => ({
+      label: memberById.get(id) ?? "—",
+      sub: true,
+      render: (r: Resolved) => severanceValueFor(r, id, "net"),
+    })),
+    { label: "Tax saved (5th rule)", render: (r) => (r.totalTaxSaving != null ? formatEUR(r.totalTaxSaving) : "—") },
+    { label: "Garden leave pay (gross)", render: (r) => (r.totalNoticePayGross > 0 ? formatEUR(r.totalNoticePayGross) : "—") },
+    { label: "Total package (gross)", render: (r) => formatEUR(r.totalPackageGross) },
+    { label: "ALG I, combined", render: (r) => (r.totals.algMonthlyNetTotal > 0 ? `${formatEUR(r.totals.algMonthlyNetTotal)}/mo` : "—") },
+    { label: "ALG I duration", render: (r) => r.algDurationLabel ?? "—" },
+    { label: "Health insurance, gap", render: (r) => (r.totalHealthGapMonthly > 0 ? `${formatEUR(r.totalHealthGapMonthly)}/mo` : "—") },
+    { label: "Health insurance, on ALG I", render: (r) => (r.totalHealthAlgMonthly > 0 ? `${formatEUR(r.totalHealthAlgMonthly)}/mo` : "—") },
+    {
+      label: "Sperrzeit risk",
+      render: (r) =>
+        r.anySperrzeitRisk ? (
+          <Badge variant="outline" style={{ borderColor: "var(--status-critical)", color: "var(--status-critical)" }}>
+            At risk
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+    { label: "Monthly burn", render: (r) => (r.monthlyBurn != null ? `${formatEUR(r.monthlyBurn)}/mo` : "—") },
+    { label: "Lowest balance", render: (r) => (r.runway ? formatEUR(r.runway.lowestBalance) : "—") },
+    {
+      label: "Lowest balance date",
+      render: (r) => (r.runway?.lowestBalanceDate ? formatDateDisplay(r.runway.lowestBalanceDate) : "—"),
+    },
+    {
+      label: "Depletion",
+      render: (r) =>
+        !r.runway ? (
+          "—"
+        ) : r.runway.depletionDate ? (
+          <Badge variant="outline" style={{ borderColor: "var(--status-critical)", color: "var(--status-critical)" }}>
+            {formatDateDisplay(r.runway.depletionDate)}
+          </Badge>
+        ) : (
+          <Badge variant="outline" style={{ borderColor: "var(--status-good)", color: "var(--status-good)" }}>
+            Sustainable
+          </Badge>
+        ),
+    },
+  ];
+
   return (
     <>
       <Card>
@@ -149,23 +274,12 @@ async function ComparisonResults({ scenarios }: { scenarios: SeveranceScenario[]
           <Table aria-label="Scenario comparison">
             <TableHeader>
               <TableRow>
-                <TableHead scope="col">Scenario</TableHead>
-                <TableHead scope="col">Depletion date</TableHead>
-                <TableHead scope="col" className="text-right">
-                  Lowest balance
-                </TableHead>
-                <TableHead scope="col" className="text-right">
-                  Monthly burn
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {resolved.map(({ scenario, runway, monthlyBurn }, i) => (
-                <TableRow key={scenario.id}>
-                  <TableCell className="font-medium">
-                    <span className="flex items-center gap-2">
+                <TableHead scope="col">Metric</TableHead>
+                {resolved.map(({ scenario }, i) => (
+                  <TableHead key={scenario.id} scope="col" className="text-right">
+                    <span className="flex items-center justify-end gap-2">
                       <span
-                        className="inline-block h-2.5 w-2.5 rounded-full"
+                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
                         style={{ backgroundColor: SERIES_COLORS[i % SERIES_COLORS.length] }}
                         aria-hidden
                       />
@@ -176,32 +290,25 @@ async function ComparisonResults({ scenarios }: { scenarios: SeveranceScenario[]
                         {scenario.name}
                       </Link>
                     </span>
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row, i) => (
+                <TableRow key={`${row.label}-${i}`}>
+                  <TableCell
+                    className={
+                      row.sub ? "pl-8 text-xs text-muted-foreground" : "font-medium text-muted-foreground"
+                    }
+                  >
+                    {row.label}
                   </TableCell>
-                  <TableCell>
-                    {!runway ? (
-                      "—"
-                    ) : runway.depletionDate ? (
-                      <Badge
-                        variant="outline"
-                        style={{ borderColor: "var(--status-critical)", color: "var(--status-critical)" }}
-                      >
-                        {formatDateDisplay(runway.depletionDate)}
-                      </Badge>
-                    ) : (
-                      <Badge
-                        variant="outline"
-                        style={{ borderColor: "var(--status-good)", color: "var(--status-good)" }}
-                      >
-                        Sustainable
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {runway ? formatEUR(runway.lowestBalance) : "—"}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {monthlyBurn != null ? `${formatEUR(monthlyBurn)}/mo` : "—"}
-                  </TableCell>
+                  {resolved.map((r) => (
+                    <TableCell key={r.scenario.id} className="text-right tabular-nums">
+                      {row.render(r)}
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))}
             </TableBody>

@@ -1,6 +1,8 @@
 # API Reference
 
-This app has no `app/api/` REST API. Almost everything is done through **Next.js Server Actions** (`"use server"` files) called directly from client forms — those are this app's real mutation surface. The only genuine HTTP endpoints are two GET-only CSV export Route Handlers. Update this doc whenever a Route Handler or a `*-actions.ts` file's exported functions change.
+This app has no `app/api/` REST API. Almost everything is done through **Next.js Server Actions** (`"use server"` files) called directly from client forms — those are this app's real mutation surface. The only genuine HTTP endpoints are two GET-only CSV export Route Handlers. Update this doc whenever a Route Handler or a `*-actions.ts` file's exported functions change — and keep `public/openapi.yaml` and the Help Centre's "API Reference" category (`components/help/help-content.ts`) in sync with the Route Handlers table below (the Server Actions table doesn't need to stay in lockstep with the Help Centre's own summarized version, but should stay accurate here).
+
+Both real endpoints are also published as a proper OpenAPI 3.1 document at **`public/openapi.yaml`** (served statically at `/openapi.yaml`, deliberately left in `PUBLIC_ROUTES` in `lib/supabase/proxy.ts` since it's a schema document, not user data — it works with Swagger Editor/Postman's "import from URL" without a session, while the routes it documents still require a real one to actually call). The in-app Help Centre (`/help` → API Reference tab) renders the same two endpoints plus a link to that file, and a full Server Actions reference list, via two new `HelpBlock` variants (`endpoint`, `link`, alongside the pre-existing `p`/`list`/`note`, plus `code` for the example CSV snippet) — see `docs/frontend-architecture.md`.
 
 ## Route Handlers (real HTTP endpoints)
 
@@ -35,15 +37,17 @@ Every file below starts with `"use server"`. Each function is called directly as
 | `app/(app)/commitments/actions.ts` | `createCommitment`, `updateCommitment`, `deleteCommitment` | `commitments`, `commitment_splits` |
 | `app/(app)/properties/actions.ts` | `createProperty`, `updateProperty`, `deleteProperty` | `properties`, `property_splits` |
 | `app/(app)/profiles/actions.ts` | `createLivingProfile`, `cloneLivingProfile`, `updateLivingProfile`, `deleteLivingProfile`, `updateCurrentLiquidSavings` | `living_profiles` (clone also duplicates the source profile's `commitments`/`income`; `updateCurrentLiquidSavings` is baseline-only in intent — DESIGN v2 §2.5 — though not server-enforced since RLS already scopes to the owner and setting it on a non-baseline row is simply unused) |
-| `app/(app)/severance-scenarios/actions.ts` | `createScenario`, `updateScenario`, `deleteScenario` | `severance_scenarios` |
+| `app/(app)/severance-scenarios/actions.ts` | `createScenario`, `updateScenario`, `deleteScenario` | `severance_scenarios` — cascades to every child table (all have `on delete cascade` FKs to `severance_scenarios.id`). `deleteScenario(id, redirectToList?)`'s second arg is only set `true` from the detail page's own delete button (redirects away from a page that's about to 404); the list page's inline delete omits it and just lets revalidation drop the card. |
+| `app/(app)/severance-scenarios/duplicate-actions.ts` | `duplicateScenario` | Deep-clones a scenario — packages, phases, events, property-ends, savings rules (remapped `package_id`s) — into a new `severance_scenarios` row named "`<original>` (copy)", then redirects to it. Checklist items are deliberately not copied (task-completion state, not a modeling assumption). Key package parameters (multiplier, include-bonus, garden leave, ...) aren't edited as part of duplicating itself — the user is sent straight to the copy, where every package field is already editable via the existing package edit form. |
 | `app/(app)/severance-scenarios/package-actions.ts` | `addScenarioPackage`, `updateScenarioPackage`, `deleteScenarioPackage` | `severance_scenario_packages` |
 | `app/(app)/severance-scenarios/phase-actions.ts` | `addScenarioPhase`, `deleteScenarioPhase` | `severance_scenario_phases` |
 | `app/(app)/severance-scenarios/event-actions.ts` | `addScenarioEvent`, `deleteScenarioEvent` | `severance_scenario_events` |
 | `app/(app)/severance-scenarios/property-end-actions.ts` | `addScenarioPropertyEnd`, `deleteScenarioPropertyEnd` | `severance_scenario_property_ends` |
 | `app/(app)/severance-scenarios/checklist-actions.ts` | `addChecklistItem`, `toggleChecklistItem`, `deleteChecklistItem` | `scenario_checklist_items` |
+| `app/(app)/severance-scenarios/savings-rule-actions.ts` | `addSavingsRule`, `deleteSavingsRule` | `severance_scenario_savings_rules` — `addSavingsRule` re-derives the target package's net-severance base and existing allocation total via `resolveScenario` and rejects a rule that would exceed it (client-side headroom check in `savings-rule-form.tsx` is UX only; this is the authoritative one) |
 | `app/(app)/severance-scenarios/variant-actions.ts` | `generateScenarioVariants` | Bulk-inserts derived `severance_scenarios` + child rows (not a simple single-table CRUD — see `docs/business-logic.md`/scenario workspace for what a "variant" is) |
 
-`app/(app)/severance-scenarios/resolve-scenario.ts` is **not** a Server Action file (no `"use server"`) — it's a plain helper (`resolveScenario`, `computeMonthlyBurn`) that composes the tax/severance/unemployment/runway calculations for the scenario pages. See `docs/business-logic.md`.
+`app/(app)/severance-scenarios/resolve-scenario.ts` is **not** a Server Action file (no `"use server"`) — it's a plain helper (`resolveScenario`, `computeMonthlyBurn`, `buildAnnualTaxSummaries`, `scenarioTotals`) that composes the tax/severance/unemployment/runway calculations for the scenario pages. See `docs/business-logic.md`.
 
 ## Adding a new mutation
 

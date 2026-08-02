@@ -27,6 +27,7 @@ One row per person in the household. Central identity table referenced by nearly
 | `statutory_health_insurance` | boolean | not null | `true` | GKV (statutory) vs PKV (private) |
 | `health_insurance_addon_rate` | numeric(4,3) | nullable | — | GKV Zusatzbeitrag rate |
 | `private_health_insurance_monthly_premium` | numeric(10,2) | nullable | — | PKV premium, used when not statutory |
+| `count_private_health_insurance_as_outgoing` | boolean | not null | `true` | Only meaningful when not statutory — whether the PKV premium is synthesized as a monthly "Insurance" outgoing (`lib/finance/health-insurance-outgoing.ts`) on the Overview dashboard and in severance-scenario runway projections. Off is the escape hatch for a household already tracking the premium some other way (e.g. a manual commitment). |
 
 Index: `household_members_user_id_idx (user_id)`. Standard 4 owner-only RLS policies.
 
@@ -292,6 +293,26 @@ Redundancy admin checklist items for a scenario (e.g. "notify health insurer"), 
 
 Index: `scenario_checklist_items_scenario_id_idx`. Standard 4 owner-only RLS policies.
 
+### `severance_scenario_savings_rules`
+
+Sets aside part of one severance package's net lump sum (a fixed amount, or a % of it — resolved to a share of the household's *running balance*, not a fixed side-account) and applies a return every `accrual_frequency` to that period's actual opening balance, added as income in that package's runway projection (`lib/runway/savings.ts`) — it rises when income/a lump sum lands and falls as the household spends its runway down. Per-package, not per-scenario — a two-package scenario validates allocation headroom independently per person, same reasoning as the ALG I claim inputs living on `severance_scenario_packages`.
+
+| Column | Type | Nullable | Default | Notes |
+|---|---|---|---|---|
+| `id` | uuid | not null | `gen_random_uuid()` | PK |
+| `user_id` | uuid | not null | `auth.uid()` | FK cascade |
+| `scenario_id` | uuid | not null | — | FK → `severance_scenarios(id)` cascade |
+| `package_id` | uuid | not null | — | FK → `severance_scenario_packages(id)` cascade |
+| `name` | text | not null | — | e.g. "Index fund" |
+| `allocation_type` | text | not null | — | `'amount'` \| `'percentage'` — exactly one of `amount`/`percentage` is set, app-side (Zod), same convention as `severance_scenario_packages.gross_severance_override` (no DB check constraint) |
+| `amount` | numeric(12,2) | nullable | — | set when `allocation_type = 'amount'` |
+| `percentage` | numeric(5,2) | nullable | — | 0–100, set when `allocation_type = 'percentage'` |
+| `annual_return_pct` | numeric(6,2) | not null | `0` | e.g. `5.00` = 5%/yr |
+| `accrual_frequency` | text | not null | — | `'monthly'` \| `'quarterly'` \| `'annually'` |
+| `created_at` | timestamptz | not null | `now()` | |
+
+Indexes: `severance_scenario_savings_rules_scenario_id_idx`, `severance_scenario_savings_rules_package_id_idx`. Standard 4 owner-only RLS policies.
+
 ## Reference / seed data tables
 
 Both tables below are global (no `user_id`), RLS-enabled with **only** a `select`-for-`authenticated` policy — rows can only be written via a migration (service role bypasses RLS). Application code reads its working parameters directly from TypeScript (`lib/tax/parameters.ts`, `lib/unemployment/parameters.ts`), **not** from these tables — they're a durable, queryable mirror for reference/audit/future-admin-UI purposes, not the live read path. Keep them in sync with the TypeScript constants when either changes.
@@ -401,6 +422,7 @@ income      ──< income_splits     >── household_members
 
 severance_scenarios
   ├─< severance_scenario_packages >── household_members
+  │     └─< severance_scenario_savings_rules
   ├─< severance_scenario_events ──> tax_profiles (nullable, SET NULL)
   ├─< severance_scenario_phases ──> living_profiles (RESTRICT)
   ├─< severance_scenario_property_ends ──> properties

@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { incomeSummary, totalMonthlyNetIncome } from "./dashboard";
-import type { HouseholdMember, Income, TaxProfile } from "@/lib/types";
+import { categoryBreakdown, incomeSummary, totalMonthlyNetIncome } from "./dashboard";
+import { memberShareOfAmount } from "./splits";
+import type { Commitment, HouseholdMember, Income, TaxProfile } from "@/lib/types";
+
+function commitment(
+  overrides: Partial<Commitment> & Pick<Commitment, "id" | "category" | "amount">
+): Commitment {
+  return {
+    profile_id: "p1",
+    name: overrides.id,
+    frequency: "monthly",
+    essential: true,
+    start_date: "2020-01-01",
+    end_date: null,
+    property_id: null,
+    ...overrides,
+  };
+}
 
 const YEAR = 2025;
 
@@ -40,8 +56,8 @@ const alice: TaxProfile = {
 const bob: TaxProfile = { ...alice, id: "tp-bob", household_member_id: "bob" };
 
 const memberById = new Map<string, HouseholdMember>([
-  ["alice", { id: "alice", name: "Alice", created_at: "", date_of_birth: null, statutory_health_insurance: true, health_insurance_addon_rate: null, private_health_insurance_monthly_premium: null }],
-  ["bob", { id: "bob", name: "Bob", created_at: "", date_of_birth: null, statutory_health_insurance: true, health_insurance_addon_rate: null, private_health_insurance_monthly_premium: null }],
+  ["alice", { id: "alice", name: "Alice", created_at: "", date_of_birth: null, statutory_health_insurance: true, health_insurance_addon_rate: null, private_health_insurance_monthly_premium: null, count_private_health_insurance_as_outgoing: true }],
+  ["bob", { id: "bob", name: "Bob", created_at: "", date_of_birth: null, statutory_health_insurance: true, health_insurance_addon_rate: null, private_health_insurance_monthly_premium: null, count_private_health_insurance_as_outgoing: true }],
 ]);
 const taxProfileByMember = new Map([
   ["alice", alice],
@@ -93,5 +109,44 @@ describe("incomeSummary", () => {
   it("returns an empty summary for no income rows", () => {
     const summary = incomeSummary([], new Map(), taxProfileByMember, memberById, YEAR);
     expect(summary).toEqual({ total: 0, byType: [], byPerson: [] });
+  });
+});
+
+describe("categoryBreakdown", () => {
+  it("lists the individual commitments behind a category's total, sorted descending, summing to it", () => {
+    const commitments = [
+      commitment({ id: "Netflix", category: "subscriptions", amount: 15 }),
+      commitment({ id: "Gym", category: "subscriptions", amount: 60 }),
+      commitment({ id: "Rent", category: "housing", amount: 1800 }),
+    ];
+    const result = categoryBreakdown(commitments);
+
+    const subs = result.find((e) => e.category === "subscriptions");
+    expect(subs?.monthly).toBe(75);
+    expect(subs?.lines).toEqual([
+      { name: "Gym", monthly: 60 },
+      { name: "Netflix", monthly: 15 },
+    ]);
+    expect(subs?.lines.reduce((sum, l) => sum + l.monthly, 0)).toBe(subs?.monthly);
+  });
+
+  it("prorates each line the same way as the total when weightFn is supplied", () => {
+    const shared = commitment({ id: "Shared subscription", category: "subscriptions", amount: 100 });
+    const splits = [
+      { id: "s1", commitment_id: shared.id, household_member_id: "alice", percentage: 30 },
+      { id: "s2", commitment_id: shared.id, household_member_id: "bob", percentage: 70 },
+    ];
+    const result = categoryBreakdown(
+      [shared],
+      (c) => memberShareOfAmount(c.amount, splits, "alice")
+    );
+    expect(result[0].monthly).toBe(30);
+    expect(result[0].lines).toEqual([{ name: "Shared subscription", monthly: 30 }]);
+  });
+
+  it("excludes a category entirely when weightFn zeroes out every commitment in it", () => {
+    const commitments = [commitment({ id: "Rent", category: "housing", amount: 1800 })];
+    const result = categoryBreakdown(commitments, () => 0);
+    expect(result).toEqual([]);
   });
 });

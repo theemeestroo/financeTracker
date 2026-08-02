@@ -1,69 +1,17 @@
 import { toMonthlyEquivalent } from "@/lib/finance/frequency";
-import { incomeBreakdownPerSplit } from "@/lib/finance/income-gross";
-import { isActiveOn, firstOfMonth, addMonths } from "@/lib/finance/date-utils";
-import { calculateNetIncome } from "@/lib/tax";
+import { firstOfMonth, addMonths } from "@/lib/finance/date-utils";
+import { calculateNetIncome, calculateCapitalGainsTax } from "@/lib/tax";
+import { isAccrualMonth, periodicAccrual, PERIODS_PER_YEAR } from "./savings";
+import { activeProfileFor, monthlyIncomeItems, monthlyCommitmentItems } from "./monthly-items";
 import type { TaxProfile } from "@/lib/types";
 import type {
   ResolvedSeveranceScenario,
-  RunwayPhase,
   RunwayResult,
   RunwayPoint,
   RunwayLineItem,
 } from "./types";
 
 const DEFAULT_HORIZON_MONTHS = 120;
-
-function activeProfileFor(date: string, phases: RunwayPhase[]): RunwayPhase {
-  let active = phases[0];
-  for (const phase of phases) {
-    if (phase.startDate <= date) active = phase;
-    else break;
-  }
-  return active;
-}
-
-/** That month's commitment spend for one profile, as signed (negative) line
- *  items — recurring-equivalent plus any one-off landing this month. */
-function monthlyCommitmentItems(phase: RunwayPhase, date: string): RunwayLineItem[] {
-  const items: RunwayLineItem[] = [];
-  for (const c of phase.profile.commitments) {
-    if (c.frequency === "one_off") {
-      if (firstOfMonth(c.start_date) === date) items.push({ label: c.name, amount: -c.amount });
-      continue;
-    }
-    if (isActiveOn(c.start_date, c.end_date, date)) {
-      items.push({ label: c.name, amount: -toMonthlyEquivalent(c.amount, c.frequency) });
-    }
-  }
-  return items;
-}
-
-/** That month's net income for one profile, per split share, as signed
- *  (positive) line items — split shares of the same income row are merged
- *  into one item, since the breakdown is household-level, not per-person. */
-function monthlyIncomeItems(
-  phase: RunwayPhase,
-  date: string,
-  taxProfileByMember: Map<string, TaxProfile>,
-  year: number
-): RunwayLineItem[] {
-  const items: RunwayLineItem[] = [];
-  for (const i of phase.profile.income) {
-    if (!isActiveOn(i.start_date, i.end_date, date)) continue;
-    // Recurring-only, same as the dashboard: a one-time annual bonus isn't
-    // timed to a specific month in this data model, so it's deliberately
-    // excluded from the month-by-month projection rather than guessed at.
-    let net = 0;
-    for (const share of incomeBreakdownPerSplit(i, i.splits, taxProfileByMember, year)) {
-      // No tax profile yet (or unattributed, zero-split income) — gross
-      // fallback, same as the dashboard's documented gap. Unlike the
-      // dashboard's totals, the runway never silently drops real cash flow.
-      net += share.net ? share.net.recurringMonthlyNet : share.gross.recurringMonthlyGross;
-    }
-    if (net !== 0) items.push({ label: i.name, amount: net });
-  }
-  return items;
-}
 
 /**
  * Month-by-month balance projection for a severance scenario (DESIGN §7).
@@ -75,7 +23,11 @@ function monthlyIncomeItems(
  * phase's `startDate` is the most recent one at or before that month
  * supplies the active commitments/income — a wholesale profile swap, not an
  * incremental diff. One-off commitments and scenario events land in their
- * own occurrence month only.
+ * own occurrence month only. Savings/investment rules (`lib/runway/savings.ts`)
+ * apply their own return rate to a share of the *actual* running balance on
+ * each accrual boundary from their own start month — not a segregated pot
+ * compounding independently, so the accrued income rises and falls with the
+ * household's real cash position.
  */
 export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult {
   if (scenario.phases.length === 0 || scenario.severances.length === 0) {
@@ -131,6 +83,8 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
         items.push({
           label: `${stream.householdMemberName} — garden leave (net)`,
           amount: stream.gardenLeaveNetMonthly,
+          householdMemberId: stream.householdMemberId,
+          grossAmount: stream.gardenLeaveGrossMonthly,
         });
       }
       if (date === stream.gardenLeaveEndMonth) {
@@ -148,7 +102,12 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
       if (!reemployed && date >= stream.gardenLeaveEndMonth) {
         const onAlg = stream.algMonthlyNet > 0 && date >= stream.algStartMonth && date < stream.algEndMonth;
         if (onAlg) {
-          items.push({ label: `${stream.householdMemberName} — ALG I (net)`, amount: stream.algMonthlyNet });
+          items.push({
+            label: `${stream.householdMemberName} — ALG I (net)`,
+            amount: stream.algMonthlyNet,
+            householdMemberId: stream.householdMemberId,
+            taxExempt: true,
+          });
         }
         const healthCost = onAlg ? stream.healthAlgMonthly : stream.healthGapMonthly;
         if (healthCost) {
@@ -176,10 +135,51 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
 
     for (const rec of activeRecurringEvents) {
       if (rec.endDate && rec.endDate < date) continue;
+      const grossMonthly = toMonthlyEquivalent(rec.grossAmount, rec.frequency);
       const amount = rec.taxProfile
         ? calculateNetIncome(rec.grossAmount, rec.frequency, rec.taxProfile, scenario.taxYear).netMonthly
-        : toMonthlyEquivalent(rec.grossAmount, rec.frequency);
-      items.push({ label: rec.name, amount });
+        : grossMonthly;
+      items.push({
+        label: rec.name,
+        amount,
+        householdMemberId: rec.taxProfile?.household_member_id,
+        grossAmount: rec.taxProfile ? grossMonthly : undefined,
+      });
+    }
+
+    // `balance` here is still this month's *opening* value — it isn't
+    // mutated until `balance += monthDelta` below, so every savings rule
+    // sees the same "start amount" for the month regardless of where in
+    // this item-building sequence it runs, including relative to this same
+    // month's own lump sum/income/commitments.
+    for (const rule of scenario.savingsRules) {
+      if (!isAccrualMonth(rule, date)) continue;
+      const grossAccrued = periodicAccrual(rule, balance);
+      if (grossAccrued === 0) continue;
+
+      // Investment returns are taxable income (Abgeltungsteuer) — a real
+      // gain is netted via the rule's own household member's tax profile;
+      // a negative accrual (interest cost on a negative balance) isn't a
+      // taxable event and passes through unchanged, same as any other cost.
+      // The Sparerpauschbetrag is an *annual* allowance, so this
+      // annualizes the period's own gross first (same steady-state
+      // approximation `calculateNetIncome` already uses for wage income)
+      // rather than letting each accrual period claim a fresh one.
+      const profile = scenario.taxProfileByMember.get(rule.householdMemberId);
+      let netAccrued = grossAccrued;
+      if (profile && grossAccrued > 0) {
+        const periodsPerYear = PERIODS_PER_YEAR[rule.accrualFrequency];
+        const netAnnual = calculateCapitalGainsTax(grossAccrued * periodsPerYear, profile, scenario.taxYear).netAnnual;
+        netAccrued = netAnnual / periodsPerYear;
+      }
+
+      items.push({
+        label: `${rule.label} — investment return`,
+        amount: netAccrued,
+        householdMemberId: rule.householdMemberId || undefined,
+        grossAmount: grossAccrued,
+        investmentIncome: true,
+      });
     }
 
     const monthDelta = items.reduce((sum, i) => sum + i.amount, 0);

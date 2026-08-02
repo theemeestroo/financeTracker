@@ -1,6 +1,6 @@
 import { toMonthlyEquivalent } from "./frequency";
 import { isActiveOn } from "./date-utils";
-import { incomeGrossBreakdown, incomeNetBreakdownForRow, incomeBreakdownPerSplit } from "./income-gross";
+import { incomeGrossBreakdown, combinedNetBreakdownByRow, combinedIncomeBreakdown } from "./income-gross";
 import type { Split } from "./splits";
 import {
   COMMITMENT_CATEGORIES,
@@ -35,9 +35,10 @@ export type NetIncomeTotals = {
 };
 
 /**
- * Nets each income row per split share via that person's own tax profile
- * (lib/finance/income-gross.ts's `incomeNetBreakdownForRow`). Shares whose
- * member has no tax profile yet — or a row with no split at all
+ * Nets each income row per split share, combined per person via that
+ * person's own tax profile (lib/finance/income-gross.ts's
+ * `combinedNetBreakdownByRow`). Shares whose member has no tax profile
+ * yet — or a row with no split at all
  * (household/unattributed income, no one to tax) — are excluded from the
  * total (not approximated as gross) and counted in `missingProfileCount`
  * so the UI can flag it — silently mixing gross and net would make the
@@ -57,13 +58,13 @@ export function totalMonthlyNetIncome(
   let netMonthly = 0;
   let missingProfileCount = 0;
 
-  for (const i of income) {
-    const { net, missingShares } = incomeNetBreakdownForRow(
-      i,
-      splitsByIncome.get(i.id) ?? [],
-      taxProfileByMember,
-      year
-    );
+  const byRow = combinedNetBreakdownByRow(
+    income,
+    (id) => splitsByIncome.get(id) ?? [],
+    taxProfileByMember,
+    year
+  );
+  for (const { net, missingShares } of byRow.values()) {
     netMonthly += net.recurringMonthlyNet;
     missingProfileCount += missingShares;
   }
@@ -71,10 +72,20 @@ export function totalMonthlyNetIncome(
   return { netMonthly, missingProfileCount };
 }
 
+export type CategoryBreakdownLineItem = {
+  name: string;
+  monthly: number;
+};
+
 export type CategoryBreakdownEntry = {
   category: CommitmentCategory;
   label: string;
   monthly: number;
+  /** The individual commitments behind `monthly`, sorted descending — the
+   *  detail behind a chart tooltip. Each line is weighted the same way as
+   *  the total (e.g. prorated to one member's split share when `weightFn`
+   *  does that), so the lines always sum to `monthly`. */
+  lines: CategoryBreakdownLineItem[];
 };
 
 /**
@@ -87,16 +98,21 @@ export function categoryBreakdown(
   weightFn: (commitment: Commitment) => number = (c) => toMonthlyEquivalent(c.amount, c.frequency)
 ): CategoryBreakdownEntry[] {
   const byCategory = new Map<CommitmentCategory, number>();
+  const linesByCategory = new Map<CommitmentCategory, CategoryBreakdownLineItem[]>();
   for (const c of commitments) {
     const monthly = weightFn(c);
     if (monthly <= 0) continue;
     byCategory.set(c.category, (byCategory.get(c.category) ?? 0) + monthly);
+    const lines = linesByCategory.get(c.category) ?? [];
+    lines.push({ name: c.name, monthly });
+    linesByCategory.set(c.category, lines);
   }
 
   return COMMITMENT_CATEGORIES.map((c) => ({
     category: c.value,
     label: c.label,
     monthly: byCategory.get(c.value) ?? 0,
+    lines: (linesByCategory.get(c.value) ?? []).sort((a, b) => b.monthly - a.monthly),
   }))
     .filter((entry) => entry.monthly > 0)
     .sort((a, b) => b.monthly - a.monthly);
@@ -128,7 +144,7 @@ export type IncomeSummary = {
 
 /**
  * Net-monthly income summarized by IncomeType and by household member in
- * one pass, via lib/finance/income-gross.ts's `incomeBreakdownPerSplit`.
+ * one pass, via lib/finance/income-gross.ts's `combinedIncomeBreakdown`.
  * Same net-only convention as totalMonthlyNetIncome above: a split share
  * with no tax profile yet, or a whole unattributed (zero-split) row,
  * contributes 0 rather than an unlabeled gross approximation — there's no
@@ -145,16 +161,16 @@ export function incomeSummary(
   const byPerson = new Map<string, number>();
   let total = 0;
 
-  for (const i of income) {
-    const shares = incomeBreakdownPerSplit(i, splitsByIncome.get(i.id) ?? [], taxProfileByMember, year);
-    for (const share of shares) {
-      if (!share.net) continue;
-      const amount = share.net.recurringMonthlyNet;
-      total += amount;
-      byType.set(i.type, (byType.get(i.type) ?? 0) + amount);
-      if (share.householdMemberId) {
-        byPerson.set(share.householdMemberId, (byPerson.get(share.householdMemberId) ?? 0) + amount);
-      }
+  const typeByIncomeId = new Map(income.map((i) => [i.id, i.type]));
+  const shares = combinedIncomeBreakdown(income, (id) => splitsByIncome.get(id) ?? [], taxProfileByMember, year);
+  for (const share of shares) {
+    if (!share.net) continue;
+    const amount = share.net.recurringMonthlyNet;
+    total += amount;
+    const type = typeByIncomeId.get(share.incomeId);
+    if (type) byType.set(type, (byType.get(type) ?? 0) + amount);
+    if (share.householdMemberId) {
+      byPerson.set(share.householdMemberId, (byPerson.get(share.householdMemberId) ?? 0) + amount);
     }
   }
 

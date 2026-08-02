@@ -7,14 +7,31 @@ import { formatMonthDisplay } from "@/lib/finance/date-utils";
 import type { RunwayLineItem, RunwayResult } from "@/lib/runway";
 
 function LineItemRow({ item, sign }: { item: RunwayLineItem; sign: "+" | "−" }) {
+  // Gross is only worth a second line when it's genuinely different from
+  // net (i.e. actually taxed) — a gross fallback (no tax profile yet) or a
+  // tax-exempt item (ALG I) would just repeat the same number twice.
+  const showGross =
+    sign === "+" && item.grossAmount != null && Math.abs(item.grossAmount - item.amount) > 0.5;
   return (
     <div className="flex items-baseline justify-between gap-3 border-b border-border py-2 text-sm last:border-b-0">
-      <span className="text-foreground">{item.label}</span>
-      <span
-        className={`shrink-0 tabular-nums font-medium ${sign === "−" ? "text-muted-foreground" : "text-foreground"}`}
-      >
-        {sign}
-        {formatEUR(item.amount)}
+      <span className="text-foreground">
+        {item.label}
+        {item.taxExempt && (
+          <span className="ml-1.5 text-xs text-muted-foreground">(tax-free)</span>
+        )}
+      </span>
+      <span className="shrink-0 text-right">
+        <span
+          className={`tabular-nums font-medium ${sign === "−" ? "text-muted-foreground" : "text-foreground"}`}
+        >
+          {sign}
+          {formatEUR(item.amount)}
+        </span>
+        {showGross && (
+          <span className="block text-xs tabular-nums text-muted-foreground">
+            {formatEUR(item.grossAmount!)} gross
+          </span>
+        )}
       </span>
     </div>
   );

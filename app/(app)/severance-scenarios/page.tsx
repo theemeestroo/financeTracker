@@ -1,11 +1,14 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Copy, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { resolveScenario } from "./resolve-scenario";
+import { resolveScenario, scenarioTotals } from "./resolve-scenario";
+import { deleteScenario } from "./actions";
+import { duplicateScenario } from "./duplicate-actions";
 import { projectRunway } from "@/lib/runway";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { DeleteButton } from "@/components/delete-button";
 import { formatEUR } from "@/lib/finance/frequency";
 import { formatDateDisplay } from "@/lib/finance/date-utils";
 import type { HouseholdMember, SeveranceScenario, SeveranceScenarioPackage } from "@/lib/types";
@@ -66,22 +69,12 @@ export default async function SeveranceScenariosPage() {
     rows.map(async (scenario) => {
       const { runwayScenario, packageSummaries } = await resolveScenario(supabase, scenario);
       const runway = runwayScenario ? projectRunway(runwayScenario) : null;
-      const earliestStart = packageSummaries.reduce(
-        (earliest: string | null, s) =>
-          !earliest || s.package.severance_start_date < earliest
-            ? s.package.severance_start_date
-            : earliest,
-        null as string | null
-      );
-      const totalGross = packageSummaries.reduce((sum, s) => sum + s.severanceGross, 0);
-      const totalNet = packageSummaries.every((s) => s.netSeverance != null)
-        ? packageSummaries.reduce((sum, s) => sum + (s.netSeverance ?? 0), 0)
-        : null;
+      const totals = scenarioTotals(packageSummaries);
       const memberNames = packageSummaries
         .map((s) => memberById.get(s.package.household_member_id) ?? "—")
         .join(", ");
       const scopeTags = summarizeScope(packageSummaries.map((s) => s.package));
-      return { scenario, packageSummaries, runway, earliestStart, totalGross, totalNet, memberNames, scopeTags };
+      return { scenario, packageSummaries, runway, totals, memberNames, scopeTags };
     })
   );
 
@@ -122,50 +115,106 @@ export default async function SeveranceScenariosPage() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {previews.map(({ scenario, runway, earliestStart, totalGross, totalNet, memberNames, scopeTags }) => (
-            <Link key={scenario.id} href={`/severance-scenarios/${scenario.id}`}>
-              <Card className="transition-colors hover:bg-muted/50">
-                <CardHeader>
-                  <CardTitle className="text-base font-semibold tracking-tight">{scenario.name}</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2 text-sm">
-                  <div className="text-muted-foreground">
-                    {memberNames || "No packages yet"} · starts{" "}
-                    {earliestStart ? formatDateDisplay(earliestStart) : "—"}
-                  </div>
-                  {scopeTags.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {scopeTags.map((tag) => (
-                        <Badge key={tag} variant="outline" className="text-xs font-normal">
-                          {tag}
-                        </Badge>
-                      ))}
+          {previews.map(({ scenario, runway, totals, memberNames, scopeTags }) => {
+            return (
+              <Card key={scenario.id} className="transition-colors hover:bg-muted/50">
+                <Link href={`/severance-scenarios/${scenario.id}`} className="block">
+                  <CardHeader>
+                    <CardTitle className="text-base font-semibold tracking-tight">{scenario.name}</CardTitle>
+                    {runway && (
+                      <CardAction>
+                        {runway.depletionDate ? (
+                          <Badge
+                            variant="outline"
+                            className="text-xs font-normal"
+                            style={{ borderColor: "var(--status-critical)", color: "var(--status-critical)" }}
+                          >
+                            Depletes {formatDateDisplay(runway.depletionDate)}
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="text-xs font-normal"
+                            style={{ borderColor: "var(--status-good)", color: "var(--status-good)" }}
+                          >
+                            Sustainable
+                          </Badge>
+                        )}
+                      </CardAction>
+                    )}
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-2 text-sm">
+                    <div className="text-muted-foreground">
+                      {memberNames || "No packages yet"} · starts{" "}
+                      {totals.earliestStart ? formatDateDisplay(totals.earliestStart) : "—"}
                     </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">Net severance</span>
-                    <span className="font-semibold tabular-nums">
-                      {totalNet != null ? formatEUR(totalNet) : `${formatEUR(totalGross)} gross`}
-                    </span>
-                  </div>
-                  {runway && (
+                    {scopeTags.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {scopeTags.map((tag) => (
+                          <Badge key={tag} variant="outline" className="text-xs font-normal">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                     <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground">Runway</span>
-                      {runway.depletionDate ? (
-                        <Badge variant="outline" style={{ borderColor: "var(--status-critical)", color: "var(--status-critical)" }}>
-                          Depletes {formatDateDisplay(runway.depletionDate)}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" style={{ borderColor: "var(--status-good)", color: "var(--status-good)" }}>
-                          Sustainable (10yr horizon)
-                        </Badge>
-                      )}
+                      <span className="text-muted-foreground">Net severance</span>
+                      <span className="font-semibold tabular-nums">
+                        {totals.totalNetSeverance != null ? formatEUR(totals.totalNetSeverance) : "—"}
+                      </span>
                     </div>
-                  )}
-                </CardContent>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Gross severance</span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {formatEUR(totals.totalGrossSeverance)}
+                      </span>
+                    </div>
+                    {totals.severanceByMember.length > 1 && (
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-muted-foreground">
+                            <th scope="col" className="pb-1 text-left font-normal">
+                              Person
+                            </th>
+                            <th scope="col" className="pb-1 text-right font-normal">
+                              Gross
+                            </th>
+                            <th scope="col" className="pb-1 text-right font-normal">
+                              Net
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {totals.severanceByMember.map((p) => (
+                            <tr key={p.householdMemberId}>
+                              <td className="py-0.5">{memberById.get(p.householdMemberId) ?? "—"}</td>
+                              <td className="py-0.5 text-right tabular-nums text-muted-foreground">
+                                {formatEUR(p.gross)}
+                              </td>
+                              <td className="py-0.5 text-right tabular-nums">
+                                {p.net != null ? formatEUR(p.net) : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </CardContent>
+                </Link>
+                <CardFooter className="justify-end gap-1 py-2">
+                  <form action={duplicateScenario.bind(null, scenario.id)}>
+                    <Button type="submit" variant="ghost" size="icon" aria-label="Duplicate">
+                      <Copy className="size-4" />
+                    </Button>
+                  </form>
+                  <DeleteButton
+                    action={deleteScenario.bind(null, scenario.id)}
+                    confirmMessage={`Delete "${scenario.name}"? This removes its packages, phases, events, and everything else in it. This can't be undone.`}
+                  />
+                </CardFooter>
               </Card>
-            </Link>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

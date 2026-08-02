@@ -2,14 +2,19 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  ArrowDownRight,
+  ArrowUpRight,
   Banknote,
   CalendarClock,
   CalendarRange,
+  Copy,
   Home,
+  Landmark,
   LayoutGrid,
   LineChart,
   ListChecks,
   Pencil,
+  PiggyBank,
   Plus,
   Receipt,
   Route,
@@ -21,8 +26,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { resolveScenario } from "../resolve-scenario";
-import { projectRunway, projectDoNothingBaseline, sensitivityAnalysis } from "@/lib/runway";
+import { resolveScenario, buildAnnualTaxSummaries } from "../resolve-scenario";
+import { deleteScenario } from "../actions";
+import { duplicateScenario } from "../duplicate-actions";
+import { projectRunway, projectDoNothingBaseline, sensitivityAnalysis, precedingMonthsSeries } from "@/lib/runway";
 import { getBaselineRunwayInputs } from "@/lib/finance/baseline-profile";
 import { pensionWartezeitTimeline } from "@/lib/severance";
 import { addScenarioEvent, deleteScenarioEvent } from "../event-actions";
@@ -31,6 +38,7 @@ import { addScenarioPackage, deleteScenarioPackage } from "../package-actions";
 import { addScenarioPropertyEnd, deleteScenarioPropertyEnd } from "../property-end-actions";
 import { generateScenarioVariants } from "../variant-actions";
 import { addChecklistItem, deleteChecklistItem, toggleChecklistItem } from "../checklist-actions";
+import { addSavingsRule, deleteSavingsRule } from "../savings-rule-actions";
 import { EventForm } from "../event-form";
 import { PhaseForm } from "../phase-form";
 import { PackageForm } from "../package-form";
@@ -38,6 +46,7 @@ import { PropertyEndForm } from "../property-end-form";
 import { VariantGeneratorForm } from "../variant-generator-form";
 import { ChecklistItemForm } from "../checklist-item-form";
 import { SensitivityEntryRow } from "../sensitivity-entry";
+import { SavingsRuleForm, type PackageAllocationOption } from "../savings-rule-form";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,10 +62,11 @@ import {
 import { DeleteButton } from "@/components/delete-button";
 import { ChecklistItemCheckbox } from "@/components/checklist-item-checkbox";
 import { RunwayProjection } from "@/components/charts/runway-projection";
+import { TaxBracketBar } from "@/components/charts/tax-bracket-bar";
 import { formatEUR } from "@/lib/finance/frequency";
 import { todayISO } from "@/lib/finance/dashboard";
-import { formatDateDisplay } from "@/lib/finance/date-utils";
-import { SCENARIO_EVENT_TYPES } from "@/lib/types";
+import { formatDateDisplay, firstOfMonth } from "@/lib/finance/date-utils";
+import { ACCRUAL_FREQUENCIES, SCENARIO_EVENT_TYPES } from "@/lib/types";
 import type {
   HouseholdMember,
   LivingProfile,
@@ -65,6 +75,7 @@ import type {
   SeveranceScenario,
   SeveranceScenarioPackage,
   SeveranceScenarioPropertyEnd,
+  SeveranceScenarioSavingsRule,
 } from "@/lib/types";
 
 /** Hero metric tile — value stays neutral ink (per the dataviz skill: text
@@ -162,6 +173,7 @@ export default async function ScenarioDetailPage({
     { data: propertyEndRows },
     { data: packageRows },
     { data: checklistRows },
+    { data: savingsRuleRows },
   ] = await Promise.all([
     supabase.from("severance_scenarios").select("*").eq("id", id).single(),
     supabase.from("household_members").select("id, name, created_at"),
@@ -188,6 +200,11 @@ export default async function ScenarioDetailPage({
       .select("id, scenario_id, template_key, label, due_date, completed, completed_at")
       .eq("scenario_id", id)
       .order("due_date", { ascending: true, nullsFirst: false }),
+    supabase
+      .from("severance_scenario_savings_rules")
+      .select("*")
+      .eq("scenario_id", id)
+      .order("created_at"),
   ]);
 
   if (!scenario) notFound();
@@ -209,14 +226,27 @@ export default async function ScenarioDetailPage({
   const { runwayScenario, packageSummaries } = await resolveScenario(supabase, typedScenario);
   const runway = runwayScenario ? projectRunway(runwayScenario) : null;
 
+  // Cash Flow tab display only — prepends the calendar months before a
+  // mid-year severance start (Jan–Mar if it starts in April) so the chart
+  // and month-breakdown table show the household's whole year. Doesn't
+  // touch depletionDate/lowestBalance/lowestBalanceDate, which stay
+  // anchored to the real projection — those measure the scenario's own
+  // impact from the severance event onward, not the calendar year as a whole.
+  const displayRunway =
+    runway && runwayScenario
+      ? { ...runway, series: [...precedingMonthsSeries(runwayScenario), ...runway.series] }
+      : runway;
+
   // "Do-nothing" baseline overlay (DESIGN v2 §2.5) — the household's own
   // current situation, independent of this (or any) scenario; only shown
   // once current_liquid_savings is set on the baseline living profile.
+  // Spans the same (possibly backfilled) dates as displayRunway so the two
+  // lines overlay point-for-point rather than the baseline starting mid-chart.
   const baselineInputs = await getBaselineRunwayInputs(supabase);
   const baselineSeries =
-    runway && baselineInputs.currentLiquidSavings != null
+    displayRunway && baselineInputs.currentLiquidSavings != null
       ? projectDoNothingBaseline(
-          runway.series.map((p) => p.date),
+          displayRunway.series.map((p) => p.date),
           baselineInputs.currentLiquidSavings,
           baselineInputs.monthlySurplus
         )
@@ -227,11 +257,64 @@ export default async function ScenarioDetailPage({
   // sensitivityAnalysis documents itself.
   const sensitivity = runwayScenario ? sensitivityAnalysis(runwayScenario) : [];
 
+  // Tax tab — per person, per calendar year, built from the same projected
+  // runway the Cash Flow tab shows (see buildAnnualTaxSummaries's own
+  // comment for why it's derived rather than recomputed independently).
+  const annualTaxSummaries =
+    runway && runwayScenario ? buildAnnualTaxSummaries(runwayScenario, runway, packageSummaries) : [];
+  const taxYearsAvailable = Array.from(new Set(annualTaxSummaries.map((s) => s.year))).sort();
+  // Default to the first year a severance lump sum actually lands — the
+  // most interesting year tax-wise — falling back to the earliest year.
+  const defaultTaxYear =
+    annualTaxSummaries.find((s) => s.severance.gross > 0)?.year ?? taxYearsAvailable[0];
+
+  // Savings/investment rules — resolve each against its own package's net
+  // severance base (net ?? gross, same fallback used throughout this page)
+  // for display, and hand the form the same headroom the server action
+  // itself re-validates.
+  const savingsRules = (savingsRuleRows ?? []) as SeveranceScenarioSavingsRule[];
+  const severanceBaseByPackage = new Map(
+    packageSummaries.map((s) => [s.package.id, s.netSeverance ?? s.severanceGross])
+  );
+  const resolvedAmountByRule = new Map(
+    savingsRules.map((rule) => {
+      const base = severanceBaseByPackage.get(rule.package_id) ?? 0;
+      const resolved =
+        rule.allocation_type === "amount" ? (rule.amount ?? 0) : ((rule.percentage ?? 0) / 100) * base;
+      return [rule.id, resolved];
+    })
+  );
+  const packageOptions: PackageAllocationOption[] = packageSummaries.map((s) => ({
+    id: s.package.id,
+    memberName: memberById.get(s.package.household_member_id) ?? "—",
+    severanceBase: s.netSeverance ?? s.severanceGross,
+    alreadyAllocated: savingsRules
+      .filter((r) => r.package_id === s.package.id)
+      .reduce((sum, r) => sum + (resolvedAmountByRule.get(r.id) ?? 0), 0),
+  }));
+
   const totalPackageGross = packageSummaries.reduce(
     (sum, s) => sum + s.severanceGross + s.noticePayGross,
     0
   );
   const combinedAlgMonthly = packageSummaries.reduce((sum, s) => sum + s.algMonthlyNet, 0);
+
+  // Net severance, combined — the direct net counterpart to "Total package"
+  // above (falls back to gross for a package whose member has no tax
+  // profile yet, same convention the Savings tab's own headroom figures
+  // already use). Per-person split only shown once there's more than one
+  // package — a single person's split would just repeat the headline number.
+  const totalNetSeverance = packageSummaries.reduce(
+    (sum, s) => sum + (s.netSeverance ?? s.severanceGross),
+    0
+  );
+  const netSeveranceByPerson = packageSummaries
+    .map((s) => ({
+      name: memberById.get(s.package.household_member_id) ?? "—",
+      net: s.netSeverance ?? s.severanceGross,
+    }))
+    .map((p) => `${p.name} ${formatEUR(p.net)}`)
+    .join(" · ");
 
   return (
     <div className="flex flex-col gap-6">
@@ -252,14 +335,26 @@ export default async function ScenarioDetailPage({
             <p className="mt-1 text-sm text-muted-foreground">No severance packages yet.</p>
           )}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          render={<Link href={`/severance-scenarios/${id}/edit`} />}
-        >
-          <Pencil className="size-4" />
-          Edit
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            render={<Link href={`/severance-scenarios/${id}/edit`} />}
+          >
+            <Pencil className="size-4" />
+            Edit
+          </Button>
+          <form action={duplicateScenario.bind(null, id)}>
+            <Button type="submit" variant="outline" size="sm">
+              <Copy className="size-4" />
+              Duplicate
+            </Button>
+          </form>
+          <DeleteButton
+            action={deleteScenario.bind(null, id, true)}
+            confirmMessage={`Delete "${typedScenario.name}"? This removes its packages, phases, events, and everything else in it. This can't be undone.`}
+          />
+        </div>
       </div>
 
       {packages.length === 0 ? (
@@ -288,8 +383,13 @@ export default async function ScenarioDetailPage({
             />
             <StatTile
               icon={Banknote}
-              label="Lowest balance"
-              value={runway ? formatEUR(runway.lowestBalance) : "—"}
+              label="Net total"
+              value={formatEUR(totalNetSeverance)}
+              sub={
+                packageSummaries.length > 1
+                  ? netSeveranceByPerson
+                  : `net · ${packageSummaries.length} ${packageSummaries.length === 1 ? "person" : "people"}`
+              }
               accent="var(--series-2)"
             />
             <StatTile
@@ -323,6 +423,14 @@ export default async function ScenarioDetailPage({
                   <Scissors className="size-4" />
                   Spend Analysis
                 </TabsTab>
+                <TabsTab value="savings">
+                  <PiggyBank className="size-4" />
+                  Savings &amp; Investment
+                </TabsTab>
+                <TabsTab value="tax">
+                  <Landmark className="size-4" />
+                  Tax
+                </TabsTab>
                 <TabsTab value="timeline">
                   <Route className="size-4" />
                   Timeline
@@ -348,6 +456,25 @@ export default async function ScenarioDetailPage({
                   pkg.severance_start_date ?? todayISO()
                 );
                 const memberName = memberById.get(pkg.household_member_id) ?? "—";
+                // This person's own net severance, carried forward by the
+                // household's *actual* projected cash-flow change from the
+                // month it landed to the month their ALG I runs out — "if
+                // you haven't found work by then, here's what's left of
+                // your payout" is a more actionable checkpoint than the
+                // re-employment date alone, and anchoring to their own net
+                // severance (rather than the household's combined balance,
+                // which could include another person's much larger package)
+                // keeps it a genuinely per-person figure.
+                const lumpSumMonth = firstOfMonth(packageSummary.gardenLeaveEndDate);
+                const algEndMonth = firstOfMonth(packageSummary.algEndDate);
+                const lumpSumBalance = runway?.series.find((p) => p.date === lumpSumMonth)?.balance ?? null;
+                const algEndBalance = runway?.series.find((p) => p.date === algEndMonth)?.balance ?? null;
+                const householdChangeSinceLumpSum =
+                  lumpSumBalance != null && algEndBalance != null ? algEndBalance - lumpSumBalance : null;
+                const severanceRemainingAfterAlg =
+                  packageSummary.netSeverance != null && householdChangeSinceLumpSum != null
+                    ? packageSummary.netSeverance + householdChangeSinceLumpSum
+                    : null;
                 return (
                   <Card key={pkg.id}>
                     <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
@@ -469,9 +596,37 @@ export default async function ScenarioDetailPage({
                           </div>
                         </div>
                         <div>
-                          <div className="text-xs text-muted-foreground">Return to work</div>
-                          <div className="text-lg font-bold tabular-nums tracking-tight">
-                            {pkg.new_job_start_date ? formatDateDisplay(pkg.new_job_start_date) : "—"}
+                          <div className="text-xs text-muted-foreground">Severance remaining after ALG I</div>
+                          <div
+                            className="text-lg font-bold tabular-nums tracking-tight"
+                            style={
+                              severanceRemainingAfterAlg != null && severanceRemainingAfterAlg < 0
+                                ? { color: "var(--status-critical)" }
+                                : undefined
+                            }
+                          >
+                            {severanceRemainingAfterAlg != null ? formatEUR(severanceRemainingAfterAlg) : "—"}
+                          </div>
+                          {householdChangeSinceLumpSum != null && (
+                            <div
+                              className="mt-0.5 inline-flex items-center gap-0.5 text-xs font-medium"
+                              style={{
+                                color:
+                                  householdChangeSinceLumpSum >= 0
+                                    ? "var(--status-good)"
+                                    : "var(--status-critical)",
+                              }}
+                            >
+                              {householdChangeSinceLumpSum >= 0 ? (
+                                <ArrowUpRight className="size-3" />
+                              ) : (
+                                <ArrowDownRight className="size-3" />
+                              )}
+                              {formatEUR(Math.abs(householdChangeSinceLumpSum))}
+                            </div>
+                          )}
+                          <div className="text-xs text-muted-foreground">
+                            {formatDateDisplay(packageSummary.algEndDate)}
                           </div>
                         </div>
                       </div>
@@ -557,13 +712,13 @@ export default async function ScenarioDetailPage({
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {!runway || runway.series.length === 0 ? (
+                  {!displayRunway || displayRunway.series.length === 0 ? (
                     <p className="py-10 text-center text-sm text-muted-foreground">
                       Add a severance package to see the projection.
                     </p>
                   ) : (
                     <>
-                      <RunwayProjection runway={runway} baselineSeries={baselineSeries} />
+                      <RunwayProjection runway={displayRunway} baselineSeries={baselineSeries} />
                       {!baselineSeries && (
                         <p className="mt-4 text-xs text-muted-foreground">
                           <Link href="/profiles" className="underline underline-offset-2">
@@ -691,6 +846,310 @@ export default async function ScenarioDetailPage({
                   )}
                 </CardContent>
               </Card>
+            </TabsPanel>
+
+            {/* Savings & Investment — set aside part of a severance lump sum;
+                the accrued return (never the principal, already counted once
+                via the lump sum) shows up as income in the projection. */}
+            <TabsPanel value="savings">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    <TitleIcon icon={PiggyBank} accent="var(--series-2)" />
+                    Savings &amp; investment rules
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4">
+                  {packageOptions.length === 0 ? (
+                    <p className="py-10 text-center text-sm text-muted-foreground">
+                      Add a severance package first — a savings rule needs one to allocate from.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-sm text-muted-foreground">
+                        Each rule&apos;s return applies to its share of the household&apos;s actual projected
+                        balance each period — not a separate account that only ever grows. It rises when
+                        income or a lump sum lands, and falls as the household spends its runway down.
+                      </p>
+                      <div className="flex flex-wrap gap-4 text-sm">
+                        {packageOptions.map((p) => (
+                          <div key={p.id} className="rounded-2xl border border-border px-4 py-3">
+                            <div className="font-medium">{p.memberName}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatEUR(p.alreadyAllocated)} allocated of {formatEUR(p.severanceBase)} net
+                              severance — {formatEUR(Math.max(0, p.severanceBase - p.alreadyAllocated))}{" "}
+                              available
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {savingsRules.length > 0 && (
+                        <Table aria-label="Savings and investment rules">
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead scope="col">Person</TableHead>
+                              <TableHead scope="col">Name</TableHead>
+                              <TableHead scope="col" className="text-right">
+                                Allocation
+                              </TableHead>
+                              <TableHead scope="col" className="text-right">
+                                Return
+                              </TableHead>
+                              <TableHead scope="col">Accrued</TableHead>
+                              <TableHead scope="col" className="w-12 text-right">
+                                &nbsp;
+                              </TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {savingsRules.map((rule) => {
+                              const option = packageOptions.find((p) => p.id === rule.package_id);
+                              const resolved = resolvedAmountByRule.get(rule.id) ?? 0;
+                              return (
+                                <TableRow key={rule.id}>
+                                  <TableCell className="font-medium">{option?.memberName ?? "—"}</TableCell>
+                                  <TableCell className="text-muted-foreground">{rule.name}</TableCell>
+                                  <TableCell className="text-right tabular-nums">
+                                    {rule.allocation_type === "percentage"
+                                      ? `${rule.percentage}% (${formatEUR(resolved)})`
+                                      : formatEUR(resolved)}
+                                  </TableCell>
+                                  <TableCell className="text-right tabular-nums">
+                                    {rule.annual_return_pct}%/yr
+                                  </TableCell>
+                                  <TableCell className="text-muted-foreground">
+                                    {ACCRUAL_FREQUENCIES.find((f) => f.value === rule.accrual_frequency)?.label ??
+                                      rule.accrual_frequency}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <DeleteButton
+                                      action={deleteSavingsRule.bind(null, rule.id, id)}
+                                      confirmMessage={`Delete "${rule.name}"?`}
+                                    />
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      )}
+
+                      <AddDisclosure label="Add savings rule" icon={Plus}>
+                        <SavingsRuleForm action={addSavingsRule.bind(null, id)} packages={packageOptions} />
+                      </AddDisclosure>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsPanel>
+
+            {/* Tax — per person, per year: the full annual tax position,
+                folding in any severance lump sum landing that year
+                (Fünftelregelung) and how much of taxable income falls in
+                each progressive bracket. Net income everywhere else in
+                this app stays netted at the point of calculation (gross
+                now shown alongside it in the Cash Flow breakdown panel)
+                rather than introducing a second, competing "tax as a
+                separate outgoing" convention — this tab is where the full
+                tax detail lives instead. */}
+            <TabsPanel value="tax">
+              {annualTaxSummaries.length === 0 ? (
+                <Card>
+                  <CardContent>
+                    <p className="py-10 text-center text-sm text-muted-foreground">
+                      {runway
+                        ? "No taxed household member has income in this projection yet."
+                        : "Add a severance package to see the projection."}
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
+                  <Tabs defaultValue={String(defaultTaxYear)}>
+                    <div className="overflow-x-auto">
+                      <TabsList>
+                        <TabsIndicator />
+                        {taxYearsAvailable.map((year) => (
+                          <TabsTab key={year} value={String(year)}>
+                            {year}
+                          </TabsTab>
+                        ))}
+                      </TabsList>
+                    </div>
+
+                    {taxYearsAvailable.map((year) => (
+                      <TabsPanel key={year} value={String(year)}>
+                        {annualTaxSummaries
+                          .filter((s) => s.year === year)
+                          .map((summary) => {
+                            const memberName = memberById.get(summary.householdMemberId) ?? "—";
+                            const effectiveRate =
+                              summary.totalGrossAll > 0
+                                ? (summary.totalTaxAll / summary.totalGrossAll) * 100
+                                : 0;
+                            return (
+                              <Card key={summary.householdMemberId}>
+                                <CardHeader>
+                                  <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                                    <TitleIcon icon={User} accent="var(--series-1)" />
+                                    {memberName} — {year}
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent className="flex flex-col gap-5">
+                                  <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
+                                    <div>
+                                      <div className="text-xs text-muted-foreground">Gross income</div>
+                                      <div className="text-2xl font-extrabold tabular-nums tracking-tight">
+                                        {formatEUR(summary.totalGrossAll)}
+                                      </div>
+                                      {summary.taxFreeIncome > 0 && (
+                                        <div className="text-xs text-muted-foreground">
+                                          incl. {formatEUR(summary.taxFreeIncome)} tax-free (ALG I)
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div>
+                                      <div className="text-xs text-muted-foreground">Taxable income</div>
+                                      <div className="text-2xl font-extrabold tabular-nums tracking-tight">
+                                        {formatEUR(summary.taxableIncome)}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs text-muted-foreground">Total tax</div>
+                                      <div className="text-2xl font-extrabold tabular-nums tracking-tight">
+                                        {formatEUR(summary.totalTaxAll)}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground">
+                                        {effectiveRate.toFixed(1)}% effective
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs text-muted-foreground">Net income</div>
+                                      <div className="text-2xl font-extrabold tabular-nums tracking-tight">
+                                        {formatEUR(summary.totalNetAll)}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {summary.incomeSources.length > 0 && (
+                                    <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-border pt-4 text-sm">
+                                      {summary.incomeSources.map((source) => (
+                                        <div key={source.label} className="text-muted-foreground">
+                                          {source.label}{" "}
+                                          <span className="font-medium text-foreground">
+                                            {formatEUR(source.grossAnnual)}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  <div className="border-t border-border pt-4">
+                                    <div className="mb-2 text-xs font-medium text-muted-foreground">
+                                      Income by tax bracket
+                                    </div>
+                                    <TaxBracketBar
+                                      steps={summary.bracketSteps}
+                                      severanceGross={summary.severance.gross}
+                                      severanceTax={summary.severance.totalTax}
+                                    />
+                                  </div>
+
+                                  {summary.investmentIncomeGross !== 0 && (
+                                    <div className="border-t border-border pt-4">
+                                      <div className="mb-2 text-xs font-medium text-muted-foreground">
+                                        Investment &amp; savings income{" "}
+                                        <span className="font-normal text-muted-foreground/70">
+                                          — flat Abgeltungsteuer, not part of the bracket above
+                                        </span>
+                                      </div>
+                                      <div className="grid grid-cols-3 gap-6">
+                                        <div>
+                                          <div className="text-xs text-muted-foreground">Gross</div>
+                                          <div className="text-lg font-bold tabular-nums tracking-tight">
+                                            {formatEUR(summary.investmentIncomeGross)}
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <div className="text-xs text-muted-foreground">Tax</div>
+                                          <div className="text-lg font-bold tabular-nums tracking-tight">
+                                            {formatEUR(summary.investmentIncomeTax)}
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <div className="text-xs text-muted-foreground">Net</div>
+                                          <div className="text-lg font-bold tabular-nums tracking-tight">
+                                            {formatEUR(summary.investmentIncomeNet)}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <div className="flex flex-wrap gap-x-8 gap-y-2 border-t border-border pt-4 text-xs text-muted-foreground">
+                                    <span>
+                                      Income tax{" "}
+                                      <span className="font-medium text-foreground">
+                                        {formatEUR(summary.incomeTax)}
+                                      </span>
+                                    </span>
+                                    {summary.soli > 0 && (
+                                      <span>
+                                        Soli{" "}
+                                        <span className="font-medium text-foreground">
+                                          {formatEUR(summary.soli)}
+                                        </span>
+                                      </span>
+                                    )}
+                                    {summary.churchTax > 0 && (
+                                      <span>
+                                        Church tax{" "}
+                                        <span className="font-medium text-foreground">
+                                          {formatEUR(summary.churchTax)}
+                                        </span>
+                                      </span>
+                                    )}
+                                    <span>
+                                      Social contributions{" "}
+                                      <span className="font-medium text-foreground">
+                                        {formatEUR(summary.socialContributions)}
+                                      </span>
+                                    </span>
+                                    {summary.severance.gross > 0 && (
+                                      <span>
+                                        Severance tax{" "}
+                                        <span className="font-medium text-foreground">
+                                          {formatEUR(summary.severance.totalTax)}
+                                        </span>
+                                      </span>
+                                    )}
+                                    {summary.investmentIncomeGross !== 0 && (
+                                      <span>
+                                        Investment tax{" "}
+                                        <span className="font-medium text-foreground">
+                                          {formatEUR(summary.investmentIncomeTax)}
+                                        </span>
+                                      </span>
+                                    )}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
+                      </TabsPanel>
+                    ))}
+                  </Tabs>
+
+                  <p className="text-xs text-muted-foreground">
+                    Investment/savings returns (Savings &amp; Investment tab) are taxed separately
+                    under the flat Abgeltungsteuer (~26.4% after the annual Sparerpauschbetrag
+                    allowance) rather than the progressive bands shown above, but are included in the
+                    gross/tax/net totals. ALG I is tax-free but can nudge the tax rate on other income
+                    in the same year (Progressionsvorbehalt) — that effect isn&apos;t modeled.
+                  </p>
+                </>
+              )}
             </TabsPanel>
 
             {/* Timeline — everything else that changes the projection over time. */}

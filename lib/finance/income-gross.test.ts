@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  incomeBreakdownPerSplit,
+  combinedIncomeBreakdown,
+  combinedNetBreakdownByRow,
   incomeGrossBreakdown,
   incomeGrossBreakdownForRow,
-  incomeNetBreakdown,
-  incomeNetBreakdownForRow,
 } from "./income-gross";
 import type { Income, TaxProfile } from "@/lib/types";
 
@@ -51,6 +50,18 @@ const profileClass3: TaxProfile = {
   tax_class: 3,
 };
 
+/** Nets a single row for a single member — the common-case shorthand every
+ *  test below uses instead of calling combinedIncomeBreakdown directly. */
+function netSingleRow(row: Income, profile: TaxProfile, year: number) {
+  const shares = combinedIncomeBreakdown(
+    [row],
+    () => [{ household_member_id: profile.household_member_id, percentage: 100 }],
+    new Map([[profile.household_member_id, profile]]),
+    year
+  );
+  return shares[0].net!.recurringMonthlyNet;
+}
+
 describe("rental overhead", () => {
   it("reduces the recurring gross by the overhead %, leaving other types untouched", () => {
     const withOverhead = incomeGrossBreakdown({ ...income, rental_overhead_pct: 20 });
@@ -61,12 +72,8 @@ describe("rental overhead", () => {
   });
 
   it("tax is calculated on the overhead-adjusted amount, not the raw rent", () => {
-    const raw = incomeNetBreakdown(income, profileClass1, YEAR).recurringMonthlyNet;
-    const adjusted = incomeNetBreakdown(
-      { ...income, rental_overhead_pct: 20 },
-      profileClass1,
-      YEAR
-    ).recurringMonthlyNet;
+    const raw = netSingleRow(income, profileClass1, YEAR);
+    const adjusted = netSingleRow({ ...income, rental_overhead_pct: 20 }, profileClass1, YEAR);
     // Net on 80% of the rent should be noticeably less than net on the full rent —
     // not just 80% of the raw-rent net, since the tax brackets differ too.
     expect(adjusted).toBeLessThan(raw);
@@ -74,9 +81,9 @@ describe("rental overhead", () => {
   });
 
   it("flows through per-split shares the same way as any other dollar field", () => {
-    const shares = incomeBreakdownPerSplit(
-      { ...income, rental_overhead_pct: 20 },
-      [
+    const shares = combinedIncomeBreakdown(
+      [{ ...income, rental_overhead_pct: 20 }],
+      () => [
         { household_member_id: "alice", percentage: 50 },
         { household_member_id: "bob", percentage: 50 },
       ],
@@ -100,21 +107,17 @@ describe("currency conversion", () => {
   });
 
   it("tax is calculated on the EUR-converted amount, not the raw foreign-currency figure", () => {
-    const eurNet = incomeNetBreakdown(income, profileClass1, YEAR).recurringMonthlyNet;
-    const gbpNet = incomeNetBreakdown(
-      { ...income, currency: "GBP", exchange_rate_to_eur: 1.17 },
-      profileClass1,
-      YEAR
-    ).recurringMonthlyNet;
+    const eurNet = netSingleRow(income, profileClass1, YEAR);
+    const gbpNet = netSingleRow({ ...income, currency: "GBP", exchange_rate_to_eur: 1.17 }, profileClass1, YEAR);
     // Same raw amount (6000), but the GBP row is worth 17% more once
     // converted — net should scale up accordingly, not match the EUR row.
     expect(gbpNet).toBeGreaterThan(eurNet);
   });
 
   it("composes correctly with rental overhead and splits — order doesn't matter", () => {
-    const shares = incomeBreakdownPerSplit(
-      { ...income, currency: "GBP", exchange_rate_to_eur: 1.2, rental_overhead_pct: 20 },
-      [
+    const shares = combinedIncomeBreakdown(
+      [{ ...income, currency: "GBP", exchange_rate_to_eur: 1.2, rental_overhead_pct: 20 }],
+      () => [
         { household_member_id: "alice", percentage: 50 },
         { household_member_id: "bob", percentage: 50 },
       ],
@@ -141,9 +144,9 @@ describe("incomeGrossBreakdownForRow", () => {
   });
 });
 
-describe("incomeBreakdownPerSplit", () => {
+describe("combinedIncomeBreakdown", () => {
   it("zero splits is unattributed — one entry, no tax profile to apply", () => {
-    const shares = incomeBreakdownPerSplit(income, [], new Map(), YEAR);
+    const shares = combinedIncomeBreakdown([income], () => [], new Map(), YEAR);
     expect(shares).toHaveLength(1);
     expect(shares[0].householdMemberId).toBe("");
     expect(shares[0].net).toBeNull();
@@ -155,9 +158,9 @@ describe("incomeBreakdownPerSplit", () => {
       ["alice", profileClass1],
       ["bob", profileClass3],
     ]);
-    const shares = incomeBreakdownPerSplit(
-      income,
-      [
+    const shares = combinedIncomeBreakdown(
+      [income],
+      () => [
         { household_member_id: "alice", percentage: 50 },
         { household_member_id: "bob", percentage: 50 },
       ],
@@ -175,42 +178,93 @@ describe("incomeBreakdownPerSplit", () => {
   });
 
   it("a share whose member has no tax profile yet nets to null", () => {
-    const shares = incomeBreakdownPerSplit(
-      income,
-      [{ household_member_id: "alice", percentage: 100 }],
+    const shares = combinedIncomeBreakdown(
+      [income],
+      () => [{ household_member_id: "alice", percentage: 100 }],
       new Map(),
       YEAR
     );
     expect(shares[0].net).toBeNull();
   });
+
+  it("a single row for a person is unaffected by combining — matches netting it alone", () => {
+    const shares = combinedIncomeBreakdown(
+      [income],
+      () => [{ household_member_id: "alice", percentage: 100 }],
+      new Map([["alice", profileClass1]]),
+      YEAR
+    );
+    expect(shares[0].net!.recurringMonthlyNet).toBeCloseTo(netSingleRow(income, profileClass1, YEAR), 5);
+  });
+
+  it("a second income source stacks on top of the first instead of getting its own fresh allowance", () => {
+    const salary: Income = {
+      ...income,
+      id: "salary",
+      name: "Salary",
+      type: "salary",
+      gross_amount: 5000,
+    };
+    const rental: Income = { ...income, id: "rental", name: "Rental", gross_amount: 800 };
+
+    // Rental netted completely on its own (the pre-fix behavior) — gets a
+    // fresh Grundfreibetrag/low brackets, so it keeps a very high share.
+    const rentalAlone = netSingleRow(rental, profileClass1, YEAR);
+
+    // Rental combined with a substantial salary for the same person — it
+    // should now share the person's much higher marginal tax position,
+    // so its effective keep-rate is far lower than when taxed alone.
+    const shares = combinedIncomeBreakdown(
+      [salary, rental],
+      () => [{ household_member_id: "alice", percentage: 100 }],
+      new Map([["alice", profileClass1]]),
+      YEAR
+    );
+    const rentalCombined = shares.find((s) => s.incomeId === "rental")!.net!.recurringMonthlyNet;
+    const salaryCombined = shares.find((s) => s.incomeId === "salary")!.net!.recurringMonthlyNet;
+
+    expect(rentalCombined).toBeLessThan(rentalAlone);
+    // Both rows for the same person carry the same average effective rate
+    // (apportionment, not a marginal-stacking order) — so rental and salary
+    // should keep the same fraction of their own gross.
+    const rentalGross = incomeGrossBreakdown(rental).recurringMonthlyGross;
+    const salaryGross = incomeGrossBreakdown(salary).recurringMonthlyGross;
+    expect(rentalCombined / rentalGross).toBeCloseTo(salaryCombined / salaryGross, 5);
+
+    // And the combined total must equal what a single row on the summed
+    // gross would net — the core "not silently dropping tax" property.
+    const combinedTotal = rentalCombined + salaryCombined;
+    const asOneRow = netSingleRow({ ...income, gross_amount: rentalGross + salaryGross }, profileClass1, YEAR);
+    expect(combinedTotal).toBeCloseTo(asOneRow, 2);
+  });
 });
 
-describe("incomeNetBreakdownForRow", () => {
+describe("combinedNetBreakdownByRow", () => {
   it("sums only the shares with a resolvable tax profile, counting the rest as missing", () => {
     const taxProfileByMember = new Map([["alice", profileClass1]]);
-    const { net, missingShares } = incomeNetBreakdownForRow(
-      income,
-      [
+    const { net, missingShares } = combinedNetBreakdownByRow(
+      [income],
+      () => [
         { household_member_id: "alice", percentage: 50 },
         { household_member_id: "bob", percentage: 50 }, // no tax profile
       ],
       taxProfileByMember,
       YEAR
-    );
+    ).get(income.id)!;
     expect(missingShares).toBe(1);
     expect(net.recurringMonthlyNet).toBeGreaterThan(0);
     // Only Alice's half is netted — well under what the full row's net would be.
-    const fullNet = incomeNetBreakdownForRow(
-      income,
-      [{ household_member_id: "alice", percentage: 100 }],
+    const fullNet = combinedNetBreakdownByRow(
+      [income],
+      () => [{ household_member_id: "alice", percentage: 100 }],
       taxProfileByMember,
       YEAR
-    ).net.recurringMonthlyNet;
+    ).get(income.id)!.net.recurringMonthlyNet;
     expect(net.recurringMonthlyNet).toBeLessThan(fullNet);
   });
 
   it("an unattributed (zero-split) row contributes 0 net and counts as 1 missing share", () => {
-    const { net, missingShares } = incomeNetBreakdownForRow(income, [], new Map(), YEAR);
+    const { net, missingShares } = combinedNetBreakdownByRow([income], () => [], new Map(), YEAR).get(income.id)!;
     expect(net.recurringMonthlyNet).toBe(0);
     expect(missingShares).toBe(1);
   });

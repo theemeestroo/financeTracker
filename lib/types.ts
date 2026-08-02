@@ -6,6 +6,11 @@ export type HouseholdMember = {
   statutory_health_insurance: boolean;
   health_insurance_addon_rate: number | null;
   private_health_insurance_monthly_premium: number | null;
+  /** Only meaningful when statutory_health_insurance is false. Default true
+   *  — see lib/finance/health-insurance-outgoing.ts for why the premium
+   *  needs counting as an outgoing at all; this is the opt-out for anyone
+   *  already tracking it some other way (e.g. a manual commitment). */
+  count_private_health_insurance_as_outgoing: boolean;
 };
 
 export type CommitmentCategory =
@@ -276,6 +281,34 @@ export type SeveranceScenarioPackage = {
    *  so ALG I is modeled starting right after garden leave/notice ends
    *  instead of being shifted by the heuristic 12-week risk flag. */
   sperrzeit_safe_confirmed: boolean;
+};
+
+export type SavingsAllocationType = "amount" | "percentage";
+export type AccrualFrequency = "monthly" | "quarterly" | "annually";
+
+export const ACCRUAL_FREQUENCIES: { value: AccrualFrequency; label: string }[] = [
+  { value: "monthly", label: "Monthly" },
+  { value: "quarterly", label: "Quarterly" },
+  { value: "annually", label: "Annually" },
+];
+
+/** Sets aside part of one person's own net severance lump sum (a fixed
+ *  amount, or a % of it — exactly one of `amount`/`percentage` is set, per
+ *  `allocation_type`) and applies `annual_return_pct`, compounding every
+ *  `accrual_frequency` — the accrued return (not the principal, which is
+ *  already counted once via the lump sum itself) shows up as income in the
+ *  runway projection. Per-package, not per-scenario: the allocation is
+ *  validated against that specific person's own severance payout. */
+export type SeveranceScenarioSavingsRule = {
+  id: string;
+  scenario_id: string;
+  package_id: string;
+  name: string;
+  allocation_type: SavingsAllocationType;
+  amount: number | null;
+  percentage: number | null;
+  annual_return_pct: number;
+  accrual_frequency: AccrualFrequency;
 };
 
 export type ScenarioEventType = "one_off_outflow" | "one_off_inflow" | "recurring_income_start";

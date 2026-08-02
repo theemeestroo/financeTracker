@@ -1,6 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getCurrentTaxYear, calculateSocialContributions, taxableWageIncome, calculateNetIncome } from "@/lib/tax";
+import {
+  getCurrentTaxYear,
+  calculateSocialContributions,
+  taxableWageIncome,
+  calculateNetIncome,
+  annualPersonTaxSummary,
+  clampToAvailableTaxYear,
+} from "@/lib/tax";
 import { calculateSeveranceNet } from "@/lib/tax/fuenftelregelung";
+import type { AnnualPersonTaxSummary, AnnualSeveranceTax } from "@/lib/tax";
 import { calculateSeverancePackage } from "@/lib/severance";
 import {
   alg1DurationMonths,
@@ -18,7 +26,16 @@ import {
 import { addDays, addMonths, ageInYears } from "@/lib/finance/date-utils";
 import type { Split } from "@/lib/finance/splits";
 import { toTaxProfile } from "@/lib/finance/tax-profile-context";
-import type { ResolvedIncome, ResolvedSeveranceScenario, SeveranceStream } from "@/lib/runway";
+import { healthInsuranceOutgoings } from "@/lib/finance/health-insurance-outgoing";
+import { aggregateAnnualIncomeByMember, precedingMonthsSeries } from "@/lib/runway";
+import { combinedIncomeBreakdown } from "@/lib/finance/income-gross";
+import type {
+  ResolvedIncome,
+  ResolvedSavingsRule,
+  ResolvedSeveranceScenario,
+  RunwayResult,
+  SeveranceStream,
+} from "@/lib/runway";
 import type {
   Commitment,
   HouseholdMember,
@@ -26,6 +43,7 @@ import type {
   IncomeSplit,
   SeveranceScenario,
   SeveranceScenarioPackage,
+  SeveranceScenarioSavingsRule,
   TaxProfileRow,
 } from "@/lib/types";
 
@@ -58,6 +76,49 @@ export function computeMonthlyBurn(runwayScenario: ResolvedSeveranceScenario): n
   );
 
   return monthlyCommitments - netMonthly;
+}
+
+export type ScenarioTotals = {
+  earliestStart: string | null;
+  /** Sum of each package's own severanceGross — deliberately excludes
+   *  noticePayGross (garden-leave wage continuation, not the severance
+   *  lump itself), so this is comparable across scenarios regardless of
+   *  whether garden leave is included. */
+  totalGrossSeverance: number;
+  /** Sum of net severance across packages — null when *any* package's
+   *  member has no tax profile yet, since a partial total (mixing real net
+   *  figures with an implicit gross-as-net for the rest) would be silently
+   *  wrong in a way that isn't visible. */
+  totalNetSeverance: number | null;
+  algMonthlyNetTotal: number;
+  /** Gross and net attributed to each package's own household member, for
+   *  a per-person breakdown display — `net` is null (not gross-substituted)
+   *  when that member has no tax profile yet, since callers showing gross
+   *  alongside it don't need net silently standing in for it. */
+  severanceByMember: { householdMemberId: string; gross: number; net: number | null }[];
+};
+
+/** Shared by the scenario list and compare pages — the small set of
+ *  headline totals every scenario tile/row shows, derived once from
+ *  `resolveScenario`'s `packageSummaries` rather than duplicated per page. */
+export function scenarioTotals(packageSummaries: ScenarioPackageSummary[]): ScenarioTotals {
+  const earliestStart = packageSummaries.reduce<string | null>(
+    (earliest, s) =>
+      !earliest || s.package.severance_start_date < earliest ? s.package.severance_start_date : earliest,
+    null
+  );
+  const totalGrossSeverance = packageSummaries.reduce((sum, s) => sum + s.severanceGross, 0);
+  const totalNetSeverance = packageSummaries.every((s) => s.netSeverance != null)
+    ? packageSummaries.reduce((sum, s) => sum + (s.netSeverance ?? 0), 0)
+    : null;
+  const algMonthlyNetTotal = packageSummaries.reduce((sum, s) => sum + s.algMonthlyNet, 0);
+  const severanceByMember = packageSummaries.map((s) => ({
+    householdMemberId: s.package.household_member_id,
+    gross: s.severanceGross,
+    net: s.netSeverance,
+  }));
+
+  return { earliestStart, totalGrossSeverance, totalNetSeverance, algMonthlyNetTotal, severanceByMember };
 }
 
 export type ScenarioPackageSummary = {
@@ -112,8 +173,15 @@ export async function resolveScenario(
 }> {
   const taxYear = getCurrentTaxYear();
 
-  const [{ data: packageRows }, { data: phaseRows }, { data: eventRows }, { data: taxProfiles }, { data: memberRows }] =
-    await Promise.all([
+  const [
+    { data: packageRows },
+    { data: phaseRows },
+    { data: eventRows },
+    { data: taxProfiles },
+    { data: memberRows },
+    { data: savingsRuleRows },
+    { data: allIncomeRows },
+  ] = await Promise.all([
       supabase
         .from("severance_scenario_packages")
         .select("*")
@@ -131,16 +199,62 @@ export async function resolveScenario(
       supabase
         .from("household_members")
         .select(
-          "id, name, created_at, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium"
+          "id, name, created_at, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium, count_private_health_insurance_as_outgoing"
+        ),
+      supabase.from("severance_scenario_savings_rules").select("*").eq("scenario_id", scenario.id),
+      // Fetched unscoped by profile (RLS already limits this to the
+      // household's own rows) — needed below to fold non-salary income into
+      // the severance's own Fünftelregelung base *before* profileIds (which
+      // depends on phases) would otherwise be known, and reused again later
+      // for the runway's per-profile income instead of a second query.
+      supabase
+        .from("income")
+        .select(
+          "id, profile_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, currency, exchange_rate_to_eur"
         ),
     ]);
 
   const packages = (packageRows ?? []) as SeveranceScenarioPackage[];
   const allTaxProfileRows = (taxProfiles ?? []) as TaxProfileRow[];
-  const memberById = new Map(((memberRows ?? []) as HouseholdMember[]).map((m) => [m.id, m]));
+  const householdMembers = (memberRows ?? []) as HouseholdMember[];
+  const memberById = new Map(householdMembers.map((m) => [m.id, m]));
   const allTaxProfiles = allTaxProfileRows.map((row) => toTaxProfile(row, memberById.get(row.household_member_id)));
   const taxProfileByMember = new Map(allTaxProfiles.map((p) => [p.household_member_id, p]));
   const taxProfileById = new Map(allTaxProfiles.map((p) => [p.id, p]));
+
+  const incomeRows = (allIncomeRows ?? []) as Income[];
+  const { data: incomeSplitRows } = await supabase
+    .from("income_splits")
+    .select("id, income_id, household_member_id, percentage")
+    .in("income_id", incomeRows.map((i) => i.id));
+  const splitsByIncome = new Map<string, Split[]>();
+  for (const s of (incomeSplitRows ?? []) as IncomeSplit[]) {
+    splitsByIncome.set(s.income_id, [...(splitsByIncome.get(s.income_id) ?? []), s]);
+  }
+
+  // Non-salary income (rental/part-time/other) a severed member also has,
+  // attributed to them via their split share, annualized — folded into the
+  // severance's own Fünftelregelung base below. It's genuine additional
+  // taxable income for the same person in the same tax year and isn't
+  // otherwise represented there (unlike salary, which the package's own
+  // `monthly_base_salary` already stands in for — excluded here so it isn't
+  // double-counted). Without this, a person with meaningful rental income
+  // alongside their severance had that severance's own progressive-bracket
+  // push computed against too small a base, understating its real tax.
+  const nonSalaryAnnualGrossByMember = new Map<string, number>();
+  for (const share of combinedIncomeBreakdown(
+    incomeRows.filter((i) => i.type !== "salary"),
+    (id) => splitsByIncome.get(id) ?? [],
+    taxProfileByMember,
+    taxYear
+  )) {
+    if (!share.householdMemberId) continue;
+    const annual = share.gross.recurringMonthlyGross * 12;
+    nonSalaryAnnualGrossByMember.set(
+      share.householdMemberId,
+      (nonSalaryAnnualGrossByMember.get(share.householdMemberId) ?? 0) + annual
+    );
+  }
 
   // ── Package + net severance, one per person ────────────────────────────
   const packageSummaries: ScenarioPackageSummary[] = packages.map((pkg) => {
@@ -152,7 +266,10 @@ export async function resolveScenario(
     let gardenLeaveNetMonthly: number | null = null;
 
     if (memberTaxProfile) {
-      const grossAnnual = (pkg.monthly_base_salary ?? 0) * 12 + pkg.annual_bonus;
+      const grossAnnual =
+        (pkg.monthly_base_salary ?? 0) * 12 +
+        pkg.annual_bonus +
+        (nonSalaryAnnualGrossByMember.get(pkg.household_member_id) ?? 0);
       const socialContribsAnnual =
         calculateSocialContributions(pkg.monthly_base_salary ?? 0, memberTaxProfile, taxYear).total *
         12;
@@ -244,8 +361,11 @@ export async function resolveScenario(
     return { runwayScenario: null, packageSummaries, taxYear };
   }
 
+  // incomeRows/splitsByIncome were already fetched above (unscoped by
+  // profile, for the Fünftelregelung base) — the per-profile filtering
+  // below (incomeByProfile) is enough to scope them to this scenario.
   const profileIds = Array.from(new Set(phases.map((p) => p.profile_id)));
-  const [{ data: allCommitments }, { data: allIncome }, { data: propertyEndRows }] = await Promise.all([
+  const [{ data: allCommitments }, { data: propertyEndRows }] = await Promise.all([
     supabase
       .from("commitments")
       .select(
@@ -253,26 +373,10 @@ export async function resolveScenario(
       )
       .in("profile_id", profileIds),
     supabase
-      .from("income")
-      .select(
-        "id, profile_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, currency, exchange_rate_to_eur"
-      )
-      .in("profile_id", profileIds),
-    supabase
       .from("severance_scenario_property_ends")
       .select("property_id, end_date")
       .eq("scenario_id", scenario.id),
   ]);
-
-  const incomeRows = (allIncome ?? []) as Income[];
-  const { data: incomeSplitRows } = await supabase
-    .from("income_splits")
-    .select("id, income_id, household_member_id, percentage")
-    .in("income_id", incomeRows.map((i) => i.id));
-  const splitsByIncome = new Map<string, Split[]>();
-  for (const s of (incomeSplitRows ?? []) as IncomeSplit[]) {
-    splitsByIncome.set(s.income_id, [...(splitsByIncome.get(s.income_id) ?? []), s]);
-  }
 
   // A scenario-scoped "end this property" override: cap the effective
   // end_date of every commitment linked to that property, without touching
@@ -313,12 +417,29 @@ export async function resolveScenario(
     return { ...i, end_date };
   });
 
+  // Same reasoning as the salary cutoff above, but for the synthesized PKV
+  // "private health insurance" outgoing (lib/finance/health-insurance-outgoing.ts):
+  // a severed member's own premium stops being counted as an ordinary
+  // outgoing once their post-employment health-insurance regime
+  // (healthGapMonthly/healthAlgMonthly below) takes over — at
+  // gardenLeaveEndDate, not severance_start_date, since garden leave is
+  // still "employed" for this purpose. Other household members (not
+  // severed in this scenario) get no cutoff — the cost is simply ongoing.
+  const healthInsuranceCutoffByMember = new Map(
+    packageSummaries.map((s) => [s.package.household_member_id, addDays(s.gardenLeaveEndDate, -1)])
+  );
+  const healthInsuranceCommitments = healthInsuranceOutgoings(
+    householdMembers,
+    "virtual",
+    healthInsuranceCutoffByMember
+  );
+
   const commitmentsByProfile = new Map<string, Commitment[]>();
   const incomeByProfile = new Map<string, ResolvedIncome[]>();
   for (const pid of profileIds) {
     commitmentsByProfile.set(
       pid,
-      commitmentsWithPropertyEnds.filter((c) => c.profile_id === pid)
+      commitmentsWithPropertyEnds.filter((c) => c.profile_id === pid).concat(healthInsuranceCommitments)
     );
     incomeByProfile.set(
       pid,
@@ -328,6 +449,39 @@ export async function resolveScenario(
     );
   }
 
+  // Savings/investment rules (per-package — see the migration's own
+  // comment for why) — resolve amount-vs-percentage against that package's
+  // own severance base (net, same net-first/gross-fallback convention as
+  // netSeveranceLumpSum below) into a *share* of the household's running
+  // balance (not a flat EUR principal — the return applies to the actual
+  // balance each period, see lib/runway/savings.ts), and anchor accrual to
+  // the same gardenLeaveEndDate the health-insurance cutoff above uses —
+  // the month the lump sum actually lands.
+  const packageSummaryById = new Map(packageSummaries.map((s) => [s.package.id, s]));
+  const savingsRules: ResolvedSavingsRule[] = ((savingsRuleRows ?? []) as SeveranceScenarioSavingsRule[])
+    .map((rule) => {
+      const summary = packageSummaryById.get(rule.package_id);
+      if (!summary) return null; // package deleted out from under an orphaned rule
+      const severanceBase = summary.netSeverance ?? summary.severanceGross;
+      const allocationFraction =
+        rule.allocation_type === "amount"
+          ? severanceBase > 0
+            ? (rule.amount ?? 0) / severanceBase
+            : 0
+          : (rule.percentage ?? 0) / 100;
+      const memberName = memberById.get(summary.package.household_member_id)?.name ?? "—";
+      return {
+        id: rule.id,
+        householdMemberId: summary.package.household_member_id,
+        label: `${memberName} — ${rule.name}`,
+        allocationFraction,
+        annualReturnPct: rule.annual_return_pct,
+        accrualFrequency: rule.accrual_frequency,
+        startMonth: summary.gardenLeaveEndDate,
+      } satisfies ResolvedSavingsRule;
+    })
+    .filter((r): r is ResolvedSavingsRule => r !== null);
+
   const severances: SeveranceStream[] = packageSummaries.map((s) => ({
     householdMemberId: s.package.household_member_id,
     householdMemberName: memberById.get(s.package.household_member_id)?.name ?? "—",
@@ -335,6 +489,7 @@ export async function resolveScenario(
     includeGardenLeave: s.package.include_garden_leave,
     noticePeriodMonths: s.package.notice_period_months ?? 0,
     gardenLeaveNetMonthly: s.gardenLeaveNetMonthly ?? s.package.monthly_base_salary ?? 0,
+    gardenLeaveGrossMonthly: s.package.monthly_base_salary ?? 0,
     netSeveranceLumpSum: s.netSeverance ?? s.severanceGross,
     algMonthlyNet: s.algMonthlyNet,
     algStartDate: s.algStartDate,
@@ -366,9 +521,100 @@ export async function resolveScenario(
         : null,
       recurringEndDate: e.recurring_end_date,
     })),
+    savingsRules,
     taxProfileByMember,
     taxYear,
   };
 
   return { runwayScenario, packageSummaries, taxYear };
+}
+
+/**
+ * Per-person, per-calendar-year tax summaries (DESIGN-agnostic "Tax" tab
+ * data) — built from the *projected* runway rather than recomputed from
+ * scratch, so it always agrees with what the Cash Flow tab already shows:
+ * regular income (salary/rental/garden leave/…) via
+ * `aggregateAnnualIncomeByMember`, one severance lump sum segment per
+ * (person, year) reused as-is from `packageSummaries` (its own
+ * Fünftelregelung figures, not retaxed here). Takes the already-projected
+ * `runway` rather than a scenario, since the page computes that once via
+ * `projectRunway` and both the Cash Flow chart and this need the same run.
+ *
+ * A mid-year severance start means the runway's own series only covers
+ * from that month onward — correct for the balance projection, but it
+ * would understate the transition year's tax position by missing the
+ * months actually earned before the severance began. `precedingMonthsSeries`
+ * backfills January through the month before the runway's start (same
+ * per-phase income/commitment logic as the real projection); only its
+ * `inflows` matter here (the aggregation below never reads outflows or
+ * balance), so it's the same source used for the Cash Flow tab's own
+ * "show me the whole year" extension.
+ */
+export function buildAnnualTaxSummaries(
+  runwayScenario: ResolvedSeveranceScenario,
+  runway: RunwayResult,
+  packageSummaries: ScenarioPackageSummary[]
+): AnnualPersonTaxSummary[] {
+  const taxProfileByMember = runwayScenario.taxProfileByMember;
+  const allIncomePoints = [...precedingMonthsSeries(runwayScenario), ...runway.series];
+
+  const severanceByKey = new Map<string, AnnualSeveranceTax>();
+  for (const s of packageSummaries) {
+    if (s.netSeverance == null) continue; // no tax profile — nothing to attribute yet
+    const year = Number(s.gardenLeaveEndDate.slice(0, 4));
+    const key = `${s.package.household_member_id}::${year}`;
+    const existing = severanceByKey.get(key) ?? { gross: 0, totalTax: 0, net: 0 };
+    severanceByKey.set(key, {
+      gross: existing.gross + s.severanceGross,
+      totalTax: existing.totalTax + (s.taxOnSeverance ?? 0),
+      net: existing.net + s.netSeverance,
+    });
+  }
+
+  const seenKeys = new Set<string>();
+  const summaries: AnnualPersonTaxSummary[] = [];
+
+  for (const entry of aggregateAnnualIncomeByMember(allIncomePoints)) {
+    const profile = taxProfileByMember.get(entry.householdMemberId);
+    if (!profile) continue;
+    const key = `${entry.householdMemberId}::${entry.year}`;
+    seenKeys.add(key);
+    // A 10-year horizon routinely reaches calendar years with no published
+    // tax formula yet — compute at the latest known year's rates (same
+    // assumption the runway projection itself already makes) but keep the
+    // real calendar year for display/grouping.
+    const summary = annualPersonTaxSummary(
+      entry.householdMemberId,
+      clampToAvailableTaxYear(entry.year),
+      entry.sources,
+      entry.taxFreeGross,
+      profile,
+      severanceByKey.get(key),
+      entry.investmentGross
+    );
+    summaries.push({ ...summary, year: entry.year });
+  }
+
+  // A severance lump sum can land in a year with no *other* attributed
+  // income (e.g. it lands in January with no garden leave beforehand) —
+  // the aggregation above wouldn't have produced an entry for that year,
+  // so add one covering just the severance.
+  for (const [key, severance] of severanceByKey) {
+    if (seenKeys.has(key)) continue;
+    const [householdMemberId, yearStr] = key.split("::");
+    const profile = taxProfileByMember.get(householdMemberId);
+    if (!profile) continue;
+    const year = Number(yearStr);
+    const summary = annualPersonTaxSummary(
+      householdMemberId,
+      clampToAvailableTaxYear(year),
+      [],
+      0,
+      profile,
+      severance
+    );
+    summaries.push({ ...summary, year });
+  }
+
+  return summaries.sort((a, b) => a.year - b.year || a.householdMemberId.localeCompare(b.householdMemberId));
 }

@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vitest";
+import { calculateCapitalGainsTax } from "@/lib/tax";
 import { projectRunway } from "./project-runway";
 import type { Split } from "@/lib/finance/splits";
-import type { Commitment, Income } from "@/lib/types";
-import type { ResolvedIncome, ResolvedSeveranceScenario, SeveranceStream } from "./types";
+import type { Commitment, Income, TaxProfile } from "@/lib/types";
+import type { ResolvedIncome, ResolvedSavingsRule, ResolvedSeveranceScenario, SeveranceStream } from "./types";
+
+const taxProfile: TaxProfile = {
+  id: "tp1",
+  household_member_id: "m1",
+  tax_class: 1,
+  church_tax: false,
+  church_tax_state: null,
+  has_children: false,
+  statutory_health_insurance: true,
+  health_insurance_addon_rate: null,
+  private_health_insurance_monthly_premium: null,
+};
 
 function commitment(overrides: Partial<Commitment>): Commitment {
   return {
@@ -55,6 +68,7 @@ function stream(overrides: Partial<SeveranceStream>): SeveranceStream {
     includeGardenLeave: false,
     noticePeriodMonths: 0,
     gardenLeaveNetMonthly: 0,
+    gardenLeaveGrossMonthly: 0,
     netSeveranceLumpSum: 0,
     algMonthlyNet: 0,
     algStartDate: "2026-01-01",
@@ -66,11 +80,25 @@ function stream(overrides: Partial<SeveranceStream>): SeveranceStream {
   };
 }
 
+function savingsRule(overrides: Partial<ResolvedSavingsRule>): ResolvedSavingsRule {
+  return {
+    id: "sr1",
+    householdMemberId: "m1",
+    label: "Member — Investment",
+    allocationFraction: 1,
+    annualReturnPct: 12,
+    accrualFrequency: "monthly",
+    startMonth: "2026-01-01",
+    ...overrides,
+  };
+}
+
 const baseScenario: ResolvedSeveranceScenario = {
   startingBalance: 0,
   severances: [stream({})],
   phases: [{ startDate: "2026-01-01", profile: { commitments: [], income: [] } }],
   events: [],
+  savingsRules: [],
   taxProfileByMember: new Map(),
   taxYear: 2026,
   horizonMonths: 12,
@@ -128,7 +156,14 @@ describe("projectRunway — month breakdown", () => {
     });
 
     const month0 = result.series[0];
-    expect(month0.breakdown?.inflows).toEqual([{ label: "Alex — garden leave (net)", amount: 3000 }]);
+    expect(month0.breakdown?.inflows).toEqual([
+      {
+        label: "Alex — garden leave (net)",
+        amount: 3000,
+        householdMemberId: "m1",
+        grossAmount: 0,
+      },
+    ]);
     expect(month0.breakdown?.outflows).toEqual([{ label: "Rent", amount: 1200 }]);
     expect(month0.balance).toBe(3000 - 1200);
 
@@ -372,5 +407,131 @@ describe("projectRunway — multiple severance streams", () => {
     expect(result.series[0].date).toBe("2026-01-01");
     expect(result.series[0].balance).toBe(10000); // only m1's lump has landed yet
     expect(result.series[3].balance).toBe(15000); // m2's lump lands in month 3 (April)
+  });
+});
+
+describe("projectRunway — savings/investment rules", () => {
+  it("applies the return to the household's actual opening balance each month, not a fixed principal", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 20000,
+      savingsRules: [savingsRule({ allocationFraction: 1, annualReturnPct: 12, accrualFrequency: "monthly" })],
+      horizonMonths: 3,
+    });
+
+    // 12%/12 = 1%/mo of that month's *opening* balance — which is itself
+    // last month's closing balance (the accrual feeds back in), so this
+    // still grows month over month, but by tracking the real balance.
+    expect(result.series[0].breakdown?.inflows).toEqual([
+      {
+        label: "Member — Investment — investment return",
+        amount: 200, // 20000 * 1%
+        householdMemberId: "m1",
+        grossAmount: 200,
+        investmentIncome: true,
+      },
+    ]);
+    expect(result.series[1].breakdown?.inflows[0].amount).toBeCloseTo(202, 5); // 20200 * 1%
+    expect(result.series[2].breakdown?.inflows[0].amount).toBeCloseTo(204.02, 5); // 20402 * 1%
+  });
+
+  it("shrinks the accrual when other spending draws the balance down", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 10000,
+      phases: [
+        { startDate: "2026-01-01", profile: { commitments: [commitment({ amount: 2000 })], income: [] } },
+      ],
+      savingsRules: [savingsRule({ allocationFraction: 1, annualReturnPct: 12, accrualFrequency: "monthly" })],
+      horizonMonths: 2,
+    });
+
+    // month 0: opening 10000 -> accrual 100; rent -2000 -> balance 10000 - 2000 + 100 = 8100.
+    const month0Accrual = result.series[0].breakdown?.inflows.find((i) => i.label.includes("investment return"));
+    expect(month0Accrual?.amount).toBeCloseTo(100, 5);
+    expect(result.series[0].balance).toBeCloseTo(8100, 5);
+    // month 1: opening 8100 (not 10100, which is what it would be without the rent) -> accrual 81, not 101.
+    const month1Accrual = result.series[1].breakdown?.inflows.find((i) => i.label.includes("investment return"));
+    expect(month1Accrual?.amount).toBeCloseTo(81, 5);
+  });
+
+  it("only accrues on the rule's own period boundaries (quarterly), not every month", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 4000,
+      savingsRules: [savingsRule({ allocationFraction: 1, annualReturnPct: 8, accrualFrequency: "quarterly" })],
+      horizonMonths: 4,
+    });
+    expect(result.series[0].breakdown?.inflows).toHaveLength(1); // month 0: accrual (8%/4 = 2% of 4000 = 80)
+    expect(result.series[0].breakdown?.inflows[0].amount).toBeCloseTo(80, 5);
+    expect(result.series[1].breakdown?.inflows).toHaveLength(0);
+    expect(result.series[2].breakdown?.inflows).toHaveLength(0);
+    expect(result.series[3].breakdown?.inflows).toHaveLength(1); // +3 months, opening 4080 -> 81.6
+    expect(result.series[3].breakdown?.inflows[0].amount).toBeCloseTo(81.6, 5);
+  });
+
+  it("doesn't accrue before the rule's own startMonth", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 5000,
+      savingsRules: [savingsRule({ startMonth: "2026-03-01" })],
+      horizonMonths: 3,
+    });
+    expect(result.series[0].breakdown?.inflows).toEqual([]);
+    expect(result.series[1].breakdown?.inflows).toEqual([]);
+    expect(result.series[2].breakdown?.inflows).toHaveLength(1);
+  });
+
+  it("sums multiple rules independently against the same shared balance in the same month", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 10000,
+      savingsRules: [
+        savingsRule({ id: "a", label: "Alice — Fund", allocationFraction: 1, annualReturnPct: 12 }),
+        savingsRule({ id: "b", label: "Bob — Deposit", allocationFraction: 0.5, annualReturnPct: 6 }),
+      ],
+      horizonMonths: 1,
+    });
+    expect(result.series[0].breakdown?.inflows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Alice — Fund — investment return", amount: 100 }), // 1 * 10000 * 1%
+        expect.objectContaining({ label: "Bob — Deposit — investment return", amount: 25 }), // 0.5 * 10000 * 0.5%
+      ])
+    );
+  });
+
+  it("nets the accrual via Abgeltungsteuer when the rule's member has a tax profile", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 100000,
+      taxProfileByMember: new Map([["m1", taxProfile]]),
+      savingsRules: [
+        savingsRule({ allocationFraction: 1, annualReturnPct: 12, accrualFrequency: "monthly", householdMemberId: "m1" }),
+      ],
+      horizonMonths: 1,
+    });
+
+    const item = result.series[0].breakdown?.inflows.find((i) => i.label.includes("investment return"));
+    const grossAccrued = 100000 * 0.01; // 12%/12 of the opening balance
+    // Sparerpauschbetrag is annual — a monthly rule annualizes (×12) before
+    // netting, then de-annualizes the result back to this month's share.
+    const netAnnual = calculateCapitalGainsTax(grossAccrued * 12, taxProfile, 2026).netAnnual;
+    expect(item?.grossAmount).toBeCloseTo(grossAccrued, 5);
+    expect(item?.amount).toBeCloseTo(netAnnual / 12, 5);
+    expect(item?.amount).toBeLessThan(grossAccrued); // genuinely taxed, not a pass-through
+    expect(item?.investmentIncome).toBe(true);
+    expect(item?.householdMemberId).toBe("m1");
+  });
+
+  it("a negative accrual (interest cost on a negative balance) is never taxed", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: -100000,
+      taxProfileByMember: new Map([["m1", taxProfile]]),
+      savingsRules: [savingsRule({ allocationFraction: 1, annualReturnPct: 12, householdMemberId: "m1" })],
+      horizonMonths: 1,
+    });
+    const item = result.series[0].breakdown?.outflows.find((i) => i.label.includes("investment return"));
+    expect(item?.amount).toBeCloseTo(1000, 5); // untaxed — full -1% of -100000 shown as an outflow
   });
 });

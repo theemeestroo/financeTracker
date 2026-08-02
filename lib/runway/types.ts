@@ -52,6 +52,39 @@ export type SeveranceStream = {
   healthGapMonthly: number;
   /** Monthly health-insurance cost while on ALG I. */
   healthAlgMonthly: number;
+  /** Gross equivalent of gardenLeaveNetMonthly (the package's own monthly
+   *  base salary) — garden leave is ordinary wage income, so it feeds the
+   *  annual tax summary's regular-income bracket bar. */
+  gardenLeaveGrossMonthly: number;
+};
+
+/** One savings/investment rule, fully resolved (amount vs.
+ *  percentage-of-severance already settled to a share — see
+ *  `SeveranceScenarioSavingsRule`). The return is **not** a segregated pot
+ *  compounding on its own — it's `allocationFraction` of the household's
+ *  *actual* running balance, recalculated fresh every accrual period
+ *  against that period's own opening balance (before that month's other
+ *  cash flows), so it rises when income/lump sums land and falls as the
+ *  household spends its runway down. Accrues from `startMonth` (the
+ *  package's own severance-lump-sum month) at `accrualFrequency`, added to
+ *  the projection as income. */
+export type ResolvedSavingsRule = {
+  id: string;
+  /** The rule's own package's household member — whose tax profile (Soli/
+   *  church-tax/married-allowance status) applies when netting the accrual
+   *  via Abgeltungsteuer (lib/tax/capital-gains-tax.ts). */
+  householdMemberId: string;
+  /** Display-only — labels this rule's accrual line items in a month breakdown. */
+  label: string;
+  /** Share (0–1) of the household's running balance this rule assumes is
+   *  invested — resolved once from amount/percentage at setup (percentage
+   *  → straight fraction; amount → amount ÷ that package's own severance
+   *  base, a one-time calibration), then reapplied every period against
+   *  the real balance rather than tracked as its own fixed sum. */
+  allocationFraction: number;
+  annualReturnPct: number;
+  accrualFrequency: "monthly" | "quarterly" | "annually";
+  startMonth: string;
 };
 
 export type ResolvedSeveranceScenario = {
@@ -62,6 +95,7 @@ export type ResolvedSeveranceScenario = {
   /** Sorted ascending by startDate; always at least one (the baseline phase). */
   phases: RunwayPhase[];
   events: RunwayEvent[];
+  savingsRules: ResolvedSavingsRule[];
   taxProfileByMember: Map<string, TaxProfile>;
   taxYear: number;
   /** Months to project forward. Defaults to 120 (10 years). */
@@ -72,6 +106,28 @@ export type RunwayLineItem = {
   label: string;
   /** Always a positive magnitude — which bucket (inflows/outflows) it's in carries the sign. */
   amount: number;
+  /** Who this line item belongs to — set only when unambiguous (income
+   *  shared across 2+ people, or household-level items like savings
+   *  accrual, are left unattributed). Used to attribute income to a
+   *  person's annual tax summary (lib/tax/annual-tax-summary.ts), not
+   *  shown directly in the cash-flow breakdown panel. */
+  householdMemberId?: string;
+  /** Gross equivalent of `amount` — undefined for outflows, tax-exempt
+   *  income (see `taxExempt`), and income whose tax treatment is handled
+   *  elsewhere (the severance lump sum, resolved via its own
+   *  Fünftelregelung figures). Feeds the progressive wage-tax bracket bar
+   *  unless `investmentIncome` redirects it to the flat-tax bucket instead. */
+  grossAmount?: number;
+  /** True for income that's tax-exempt at the wage-tax level (ALG I) — the
+   *  German Progressionsvorbehalt effect (tax-free but still nudges the
+   *  rate on other income) isn't modeled; this just keeps it out of the
+   *  progressive-bracket view rather than mislabeling it as untaxed wages. */
+  taxExempt?: boolean;
+  /** True for savings/investment accrual — `grossAmount` here is capital
+   *  income taxed under the flat Abgeltungsteuer (lib/tax/capital-gains-tax.ts),
+   *  not the progressive wage-tax bands, so the annual tax summary routes
+   *  it to its own bucket instead of the regular-income one. */
+  investmentIncome?: boolean;
 };
 
 /** Every cash-flow line making up one month's balance change, split by

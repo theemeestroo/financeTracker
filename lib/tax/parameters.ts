@@ -49,6 +49,11 @@ export interface TaxYearParameters {
     specialExpensesFlatRate: number; // Sonderausgaben-Pauschbetrag
     singleParentRelief: number; // Entlastungsbetrag für Alleinerziehende (tax class II)
   };
+  capitalGains: {
+    flatRate: number; // Abgeltungsteuer, flat since 2009
+    sparerPauschbetragSingle: number; // annual tax-free allowance on capital income
+    sparerPauschbetragMarried: number; // both partners' allowance combined (Zusammenveranlagung)
+  };
 }
 
 export const TAX_YEAR_PARAMETERS: Record<number, TaxYearParameters> = {
@@ -92,6 +97,11 @@ export const TAX_YEAR_PARAMETERS: Record<number, TaxYearParameters> = {
       specialExpensesFlatRate: 36,
       singleParentRelief: 4260,
     },
+    capitalGains: {
+      flatRate: 0.25,
+      sparerPauschbetragSingle: 1000,
+      sparerPauschbetragMarried: 2000,
+    },
   },
   2026: {
     year: 2026,
@@ -133,6 +143,11 @@ export const TAX_YEAR_PARAMETERS: Record<number, TaxYearParameters> = {
       specialExpensesFlatRate: 36,
       singleParentRelief: 4260,
     },
+    capitalGains: {
+      flatRate: 0.25,
+      sparerPauschbetragSingle: 1000,
+      sparerPauschbetragMarried: 2000,
+    },
   },
 };
 
@@ -146,9 +161,25 @@ export function getTaxYearParameters(year: number): TaxYearParameters {
   return params;
 }
 
+function latestAvailableTaxYear(): number {
+  return Math.max(...Object.keys(TAX_YEAR_PARAMETERS).map(Number));
+}
+
 /** The current calendar year, clamped to the latest year we have parameters for. */
 export function getCurrentTaxYear(): number {
-  const years = Object.keys(TAX_YEAR_PARAMETERS).map(Number);
-  const latest = Math.max(...years);
-  return Math.min(new Date().getFullYear(), latest);
+  return Math.min(new Date().getFullYear(), latestAvailableTaxYear());
+}
+
+/**
+ * Clamps an arbitrary calendar year down to the latest year we have real
+ * parameters for — future-dated projections (a 10-year runway horizon
+ * routinely reaches years with no published §32a formula yet) assume
+ * today's rates hold rather than erroring, the same assumption
+ * `project-runway.ts` already makes by taxing its entire horizon at one
+ * fixed `scenario.taxYear`. Callers that need to *label* a result with the
+ * real calendar year (e.g. a per-year tax summary) should keep that
+ * separately — this only affects which year's formula computes the tax.
+ */
+export function clampToAvailableTaxYear(year: number): number {
+  return Math.min(year, latestAvailableTaxYear());
 }

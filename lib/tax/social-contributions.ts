@@ -15,8 +15,12 @@ export type SocialContributions = {
  *
  * Privately insured members (statutory_health_insurance = false) are modeled
  * with health/care contributions at 0 here — private premiums are a fixed
- * monthly cost, not a percentage of income, and belong in `commitments`
- * rather than the tax engine.
+ * monthly cost, not a percentage of income, so they don't belong in a
+ * payroll-percentage calculation. That doesn't mean the cost disappears:
+ * `lib/finance/health-insurance-outgoing.ts` synthesizes it as a monthly
+ * "Insurance" outgoing (Overview dashboard and severance-scenario runway
+ * alike) precisely because nothing here charges it — omitting that step
+ * would silently overstate a PKV household's net income.
  */
 export function calculateSocialContributions(
   grossMonthly: number,

@@ -18,6 +18,7 @@ import {
   totalMonthlyNetIncome,
 } from "@/lib/finance/dashboard";
 import { computeHistoricalTrend, trendMonthsAvailable } from "@/lib/finance/trend";
+import { healthInsuranceOutgoings } from "@/lib/finance/health-insurance-outgoing";
 import { getCurrentTaxYear } from "@/lib/tax";
 import { getBaselineProfile } from "@/lib/finance/baseline-profile";
 import { toMonthlyEquivalent } from "@/lib/finance/frequency";
@@ -60,7 +61,7 @@ export default async function OverviewPage({
       supabase
         .from("household_members")
         .select(
-          "id, name, created_at, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium"
+          "id, name, created_at, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium, count_private_health_insurance_as_outgoing"
         ),
       supabase
         .from("tax_profiles")
@@ -89,6 +90,20 @@ export default async function OverviewPage({
       s,
     ]);
   }
+
+  // Synthesized "private health insurance" outgoing (never a real DB row —
+  // see lib/finance/health-insurance-outgoing.ts) folded into the same
+  // totals/breakdown/owner-filter machinery as real commitments. Each gets
+  // a 100%-to-that-member virtual split so the owner filter attributes it
+  // correctly instead of falling into the unattributed "household" bucket.
+  const healthInsuranceCommitments = healthInsuranceOutgoings(householdMembers, baselineProfileId);
+  for (const c of healthInsuranceCommitments) {
+    const memberId = c.id.replace("health-insurance-", "");
+    splitsByCommitment.set(c.id, [
+      { id: `virtual-${c.id}`, commitment_id: c.id, household_member_id: memberId, percentage: 100 },
+    ]);
+  }
+  const allCommitmentsWithHealth = [...allCommitments, ...healthInsuranceCommitments];
 
   const { data: incomeSplitRows } = await supabase
     .from("income_splits")
@@ -135,7 +150,7 @@ export default async function OverviewPage({
     );
   }
 
-  const active = activeCommitments(allCommitments, onDate);
+  const active = activeCommitments(allCommitmentsWithHealth, onDate);
   const activeInc = activeIncome(allIncome, onDate);
   const monthlyCommitments = totalMonthlyCommitments(active);
   const year = getCurrentTaxYear();
@@ -175,10 +190,10 @@ export default async function OverviewPage({
       : undefined
   );
 
-  const trendMonths = trendMonthsAvailable(allCommitments, allIncome);
+  const trendMonths = trendMonthsAvailable(allCommitmentsWithHealth, allIncome);
   const trend =
     trendMonths >= 2
-      ? computeHistoricalTrend(allCommitments, allIncome, splitsByIncome, taxProfileByMember, year, trendMonths)
+      ? computeHistoricalTrend(allCommitmentsWithHealth, allIncome, splitsByIncome, taxProfileByMember, year, trendMonths)
       : null;
 
   return (

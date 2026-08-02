@@ -1,7 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_ROUTES = ["/login"];
+// /openapi.yaml is a static schema document, not user data — kept
+// fetchable without a session so it works with external tooling (Swagger
+// Editor, Postman's "import from URL", etc.), same reasoning as most APIs
+// publishing their spec at a public, unauthenticated URL. The two routes
+// it documents still require a real session to actually call.
+const PUBLIC_ROUTES = ["/login", "/openapi.yaml"];
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });

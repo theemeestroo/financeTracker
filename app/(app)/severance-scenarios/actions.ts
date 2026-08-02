@@ -91,8 +91,12 @@ export async function updateScenario(
   redirect(`/severance-scenarios/${id}`);
 }
 
-export async function deleteScenario(id: string) {
+/** `redirectToList` is only for the detail page's own delete button — the
+ *  list page's inline delete just wants the card gone via revalidation,
+ *  not a navigation away from the page it's already on. */
+export async function deleteScenario(id: string, redirectToList = false) {
   const supabase = await createClient();
   await supabase.from("severance_scenarios").delete().eq("id", id);
   revalidatePath("/severance-scenarios");
+  if (redirectToList) redirect("/severance-scenarios");
 }

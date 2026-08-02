@@ -36,11 +36,25 @@ function ChartTooltip({
   if (!active || !payload?.length) return null;
   const entry = payload[0].payload;
   return (
-    <div className="rounded-2xl border border-border bg-popover px-3.5 py-2.5 text-sm shadow-sm">
-      <div className="font-medium text-popover-foreground">{entry.label}</div>
-      <div className="tabular-nums text-muted-foreground">
-        {formatEUR(entry.monthly)}/mo
+    <div className="max-w-64 rounded-2xl border border-border bg-popover px-3.5 py-2.5 text-sm shadow-sm">
+      <div className="flex items-baseline justify-between gap-4">
+        <span className="font-medium text-popover-foreground">{entry.label}</span>
+        <span className="shrink-0 tabular-nums text-muted-foreground">
+          {formatEUR(entry.monthly)}/mo
+        </span>
       </div>
+      {entry.lines.length > 0 && (
+        <div className="mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5">
+          {entry.lines.map((line) => (
+            <div key={line.name} className="flex items-baseline justify-between gap-4 text-xs">
+              <span className="text-muted-foreground">{line.name}</span>
+              <span className="shrink-0 tabular-nums text-popover-foreground">
+                {formatEUR(line.monthly)}/mo
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

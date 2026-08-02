@@ -36,7 +36,7 @@ It delegates to **`updateSession`** in `lib/supabase/proxy.ts`, which runs on ev
 
 1. Builds a Supabase SSR client bound to the request/response cookie jar.
 2. Calls `supabase.auth.getUser()` — this both authenticates the request and **refreshes the session token**. The code has an explicit comment warning not to run anything between client creation and this call, since the refresh must happen unconditionally on every request.
-3. `PUBLIC_ROUTES = ["/login"]`. If there's no user and the route isn't public → redirect to `/login`. If there *is* a user and the route *is* `/login` → redirect to `/`. Otherwise pass through with the refreshed cookies attached.
+3. `PUBLIC_ROUTES = ["/login", "/openapi.yaml"]`. If there's no user and the route isn't public → redirect to `/login`. If there *is* a user and the route *is* `/login` → redirect to `/`. Otherwise pass through with the refreshed cookies attached. `/openapi.yaml` (a static schema document under `public/`, not user data) is the one deliberate exception to "everything requires a session" — left fetchable without one so external tooling (Swagger Editor, Postman's "import from URL") can read it directly; the two HTTP routes it documents still check `auth.getUser()` themselves and 401 without a real session, so this doesn't expose any data.
 
 ## Page-level auth gate (defense in depth)
 

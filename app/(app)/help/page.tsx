@@ -1,4 +1,4 @@
-import { BookOpen, LifeBuoy, ShieldAlert, TrendingDown } from "lucide-react";
+import { BookOpen, FileJson, LifeBuoy, ShieldAlert, TrendingDown } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsIndicator, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
@@ -15,6 +15,7 @@ const CATEGORY_ICONS: Record<HelpCategory, LucideIcon> = {
   "Everyday finances": TrendingDown,
   "Severance & redundancy scenarios": LifeBuoy,
   "Concepts & disclaimers": ShieldAlert,
+  "API Reference": FileJson,
 };
 
 function HelpBlockView({ block }: { block: HelpBlock }) {
@@ -32,13 +33,52 @@ function HelpBlockView({ block }: { block: HelpBlock }) {
       </ul>
     );
   }
+  if (block.type === "note") {
+    return (
+      <div
+        className="rounded-lg border px-3 py-2 text-sm"
+        style={{ borderColor: "var(--status-warning)", color: "var(--status-warning)" }}
+      >
+        {block.text}
+      </div>
+    );
+  }
+  if (block.type === "endpoint") {
+    return (
+      <div className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5">
+        <span
+          className="mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs font-bold tracking-wide tabular-nums"
+          style={{
+            backgroundColor: "color-mix(in oklch, var(--status-good) 18%, transparent)",
+            color: "var(--status-good)",
+          }}
+        >
+          {block.method}
+        </span>
+        <div className="flex flex-col gap-0.5">
+          <code className="text-sm font-medium text-foreground">{block.path}</code>
+          <span className="text-sm text-muted-foreground">{block.description}</span>
+        </div>
+      </div>
+    );
+  }
+  if (block.type === "code") {
+    return (
+      <pre className="overflow-x-auto rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+        <code>{block.text}</code>
+      </pre>
+    );
+  }
+  // link
   return (
-    <div
-      className="rounded-lg border px-3 py-2 text-sm"
-      style={{ borderColor: "var(--status-warning)", color: "var(--status-warning)" }}
+    <a
+      href={block.href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-sm font-medium text-primary underline underline-offset-2"
     >
       {block.text}
-    </div>
+    </a>
   );
 }
 

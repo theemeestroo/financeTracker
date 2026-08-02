@@ -4,10 +4,19 @@ import type { TaxProfile } from "@/lib/types";
 
 /**
  * Which health-insurance cost regime applies for a given month of a
- * severance scenario. "employed" (still on payroll or garden leave) needs
- * no separate handling — it's already correctly priced inside
- * calculateNetIncome/calculateSocialContributions — so only the two states
- * that exist *because* employment ended are modeled here.
+ * severance scenario. "employed" (still on payroll or garden leave) is
+ * correctly priced inside calculateNetIncome/calculateSocialContributions
+ * for GKV (a real percentage-of-income deduction) — but *not* for PKV,
+ * which calculateSocialContributions deliberately charges nothing (its own
+ * comment explains why: the employer subsidy already shows up as extra net
+ * pay, and a fixed premium doesn't belong in a payroll-percentage
+ * calculation). That gap is real money a PKV household still pays every
+ * month of ordinary employment, not just after it ends — it's costed by
+ * `lib/finance/health-insurance-outgoing.ts` as a synthesized commitment
+ * instead of a third regime here, since "employed" isn't a scenario-only
+ * concept (the Overview dashboard needs the exact same cost with no
+ * severance scenario in sight). Only the two states that exist *because*
+ * employment ended are modeled in this file.
  */
 export type HealthInsuranceRegime = "gap" | "alg1";
 

@@ -22,6 +22,9 @@ export function HouseholdMemberForm({
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
   const [statutory, setStatutory] = useState(defaultValues?.statutory_health_insurance ?? true);
+  const [countAsOutgoing, setCountAsOutgoing] = useState(
+    defaultValues?.count_private_health_insurance_as_outgoing ?? true
+  );
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
@@ -91,6 +94,29 @@ export function HouseholdMemberForm({
           />
           <span className="text-xs text-muted-foreground">
             Used to cost PKV through a severance scenario&apos;s employed → gap → ALG I transition
+          </span>
+
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              id="count_private_health_insurance_as_outgoing"
+              name="count_private_health_insurance_as_outgoing"
+              type="checkbox"
+              checked={countAsOutgoing}
+              onChange={(e) => setCountAsOutgoing(e.target.checked)}
+              className="size-4 rounded border-input accent-foreground"
+            />
+            <Label
+              htmlFor="count_private_health_insurance_as_outgoing"
+              className="font-normal"
+            >
+              Count this premium as a monthly outgoing
+            </Label>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            The employer subsidy already shows up as extra net pay, so this premium is counted
+            as an &quot;Insurance&quot; outgoing on the Overview dashboard and in severance
+            projections by default. Turn off only if you already track it as a manual
+            commitment.
           </span>
         </div>
       )}

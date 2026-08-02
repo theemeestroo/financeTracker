@@ -13,7 +13,7 @@ export default async function EditHouseholdMemberPage({
   const { data: member } = await supabase
     .from("household_members")
     .select(
-      "id, name, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium"
+      "id, name, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium, count_private_health_insurance_as_outgoing"
     )
     .eq("id", id)
     .single();

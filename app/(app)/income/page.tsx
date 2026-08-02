@@ -17,9 +17,9 @@ import { CurrencyAmount } from "@/components/currency-amount";
 import { CollapsibleTableGroup } from "@/components/collapsible-table-group";
 import { formatEUR } from "@/lib/finance/frequency";
 import {
-  incomeBreakdownPerSplit,
+  combinedIncomeBreakdown,
+  combinedNetBreakdownByRow,
   incomeGrossBreakdownForRow,
-  incomeNetBreakdownForRow,
   type IncomeGrossBreakdown,
   type IncomeNetBreakdown,
 } from "@/lib/finance/income-gross";
@@ -127,10 +127,19 @@ export default async function IncomePage() {
   const hasResolvedShareByRow = new Map<string, boolean>();
   let missingProfileCount = 0;
 
+  const netBreakdownByRow = combinedNetBreakdownByRow(
+    rows,
+    (id) => splitsByIncome.get(id) ?? [],
+    taxProfileByMember,
+    year
+  );
   for (const i of rows) {
     const splits = splitsByIncome.get(i.id) ?? [];
     grossByRow.set(i.id, incomeGrossBreakdownForRow(i, splits));
-    const { net, missingShares } = incomeNetBreakdownForRow(i, splits, taxProfileByMember, year);
+    const { net, missingShares } = netBreakdownByRow.get(i.id) ?? {
+      net: { recurringMonthlyNet: 0, oneTimeAnnualNet: 0 },
+      missingShares: Math.max(splits.length, 1),
+    };
     netByRow.set(i.id, net);
     missingProfileCount += missingShares;
     hasResolvedShareByRow.set(i.id, missingShares < Math.max(splits.length, 1));
@@ -176,24 +185,21 @@ export default async function IncomePage() {
   const oneTimeGrossByMember = new Map<string, number>();
   const pensionByMember = new Map<string, number>();
   const carByMember = new Map<string, number>();
-  for (const i of rows) {
-    const splits = splitsByIncome.get(i.id) ?? [];
-    for (const share of incomeBreakdownPerSplit(i, splits, taxProfileByMember, year)) {
-      if (!share.householdMemberId) continue; // unattributed — no one to attribute the share to
-      const id = share.householdMemberId;
-      netMonthlyByMember.set(
-        id,
-        (netMonthlyByMember.get(id) ?? 0) + (share.net?.recurringMonthlyNet ?? 0)
-      );
-      grossMonthlyByMember.set(
-        id,
-        (grossMonthlyByMember.get(id) ?? 0) + share.gross.recurringMonthlyGross
-      );
-      oneTimeNetByMember.set(id, (oneTimeNetByMember.get(id) ?? 0) + (share.net?.oneTimeAnnualNet ?? 0));
-      oneTimeGrossByMember.set(id, (oneTimeGrossByMember.get(id) ?? 0) + share.gross.oneTimeAnnualGross);
-      pensionByMember.set(id, (pensionByMember.get(id) ?? 0) + share.gross.annualPensionContribution);
-      carByMember.set(id, (carByMember.get(id) ?? 0) + share.gross.annualCarAllowance);
-    }
+  for (const share of combinedIncomeBreakdown(rows, (id) => splitsByIncome.get(id) ?? [], taxProfileByMember, year)) {
+    if (!share.householdMemberId) continue; // unattributed — no one to attribute the share to
+    const id = share.householdMemberId;
+    netMonthlyByMember.set(
+      id,
+      (netMonthlyByMember.get(id) ?? 0) + (share.net?.recurringMonthlyNet ?? 0)
+    );
+    grossMonthlyByMember.set(
+      id,
+      (grossMonthlyByMember.get(id) ?? 0) + share.gross.recurringMonthlyGross
+    );
+    oneTimeNetByMember.set(id, (oneTimeNetByMember.get(id) ?? 0) + (share.net?.oneTimeAnnualNet ?? 0));
+    oneTimeGrossByMember.set(id, (oneTimeGrossByMember.get(id) ?? 0) + share.gross.oneTimeAnnualGross);
+    pensionByMember.set(id, (pensionByMember.get(id) ?? 0) + share.gross.annualPensionContribution);
+    carByMember.set(id, (carByMember.get(id) ?? 0) + share.gross.annualCarAllowance);
   }
   const memberLabel = (id: string) => memberById.get(id) ?? "—";
   const netMonthlyBreakdown = breakdownLabel(netMonthlyByMember, memberLabel);
