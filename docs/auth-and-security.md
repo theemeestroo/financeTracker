@@ -7,9 +7,10 @@ Update this doc whenever the auth flow, roles/permissions, or a security-relevan
 Email/password only, via Supabase Auth. There is **no self-service sign-up flow** in the app — users are provisioned directly in Supabase (this is a single-household personal tool, not a multi-tenant product). `app/login/page.tsx` only renders a sign-in form.
 
 - **`login(prevState, formData)`** (`lib/actions/auth.ts`) — `zod`-validates email/password, calls `supabase.auth.signInWithPassword`, returns `{ error: "Incorrect email or password." }` on failure (deliberately generic, doesn't distinguish "no such user" from "wrong password"), `redirect("/")` on success.
+- **`loginAsDemo(formData)`** (`lib/actions/auth.ts`) — the "View Demo" button on `app/login/page.tsx`, next to the sign-in form. Reads `DEMO_USER_EMAIL`/`DEMO_USER_PASSWORD` (server-only env vars, never sent to the client) and calls the same `supabase.auth.signInWithPassword` as a real login — no bypass code, no service-role key, no parallel data-access path. The demo account is a real Supabase Auth user seeded by `supabase/migrations/20260802120000_demo_user_seed.sql` (plus two follow-up fixups: `20260802130000` corrects `instance_id`, which must match every other row's `00000000-0000-0000-0000-000000000000` or GoTrue's own lookup treats the user as not found; `20260802140000` adds the missing `income_splits` attribution) with a full sample household — income, regular/discretionary/one-off commitments, and four severance scenarios (1.0x/1.5x/2.0x/2.5x multiplier, identical salary/bonus/Christmas-pay/holiday-pay inputs otherwise) — so a visitor sees a populated app immediately. Returns `{ error: "Demo login isn't configured." }` if the env vars are unset, `{ error: "Demo login failed." }` on a Supabase Auth error.
 - **`logout()`** (`lib/actions/auth.ts`) — `supabase.auth.signOut()`, `redirect("/login")`.
 
-Every new Supabase Auth user automatically gets a baseline `living_profiles` row and a `household_members` row via the `handle_new_user()` DB trigger (`SECURITY DEFINER`, fires `after insert on auth.users`) — see `docs/data-model.md`.
+Every new Supabase Auth user automatically gets a baseline `living_profiles` row and a `household_members` row via the `handle_new_user()` DB trigger (`SECURITY DEFINER`, fires `after insert on auth.users`) — see `docs/data-model.md`. This includes the demo user: its seed migration inserts directly into `auth.users`/`auth.identities` (the standard way to seed a password-auth user via SQL — GoTrue's trigger and defaults still apply since it's a plain `INSERT`), so `handle_new_user()` fires for it exactly as it would for a real sign-up.
 
 ## Two Supabase client factories
 
@@ -65,10 +66,15 @@ Two exceptions, both **read-only global reference data** (`tax_year_parameters`,
 
 ## Secrets & environment
 
-Only two env vars exist, both `NEXT_PUBLIC_*` (intentionally exposed to the browser — the anon key is safe to expose by Supabase's design, since RLS is the real boundary):
+Two env vars are `NEXT_PUBLIC_*` (intentionally exposed to the browser — the anon key is safe to expose by Supabase's design, since RLS is the real boundary):
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+Two more are server-only (never `NEXT_PUBLIC_*`, never read from a client component) — the seeded demo account's credentials, used only by `loginAsDemo()`:
+
+- `DEMO_USER_EMAIL`
+- `DEMO_USER_PASSWORD`
 
 No service-role key is used anywhere in this codebase. If one is ever introduced (e.g. for an admin task), it must never be `NEXT_PUBLIC_*` and must never be used in code reachable from a client-side bundle.
 

@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { PlaneTakeoff } from "lucide-react";
-import { login } from "@/lib/actions/auth";
+import { login, loginAsDemo } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,10 @@ import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function LoginPage() {
   const [state, action, pending] = useActionState(login, undefined);
+  const [demoState, demoAction, demoPending] = useActionState(
+    async (_prevState: { error?: string } | undefined, formData: FormData) => loginAsDemo(formData),
+    undefined
+  );
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-background px-4">
@@ -56,6 +60,21 @@ export default function LoginPage() {
             )}
             <Button type="submit" disabled={pending} className="mt-2">
               {pending ? "Signing in…" : "Sign in"}
+            </Button>
+          </form>
+          <div className="mt-5 flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground uppercase tracking-wide">or</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <form action={demoAction} className="mt-5">
+            {demoState?.error && (
+              <p role="alert" className="mb-2 text-sm text-destructive">
+                {demoState.error}
+              </p>
+            )}
+            <Button type="submit" variant="outline" disabled={demoPending} className="w-full">
+              {demoPending ? "Loading demo…" : "View Demo"}
             </Button>
           </form>
         </CardContent>
