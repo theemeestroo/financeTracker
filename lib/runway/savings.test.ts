@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAccrualMonth, periodicAccrual } from "./savings";
+import { isAccrualMonth, periodicAccrual, resolveSavingsPrincipal } from "./savings";
 import type { ResolvedSavingsRule } from "./types";
 
 function rule(overrides: Partial<ResolvedSavingsRule> = {}): ResolvedSavingsRule {
@@ -7,7 +7,7 @@ function rule(overrides: Partial<ResolvedSavingsRule> = {}): ResolvedSavingsRule
     id: "r1",
     householdMemberId: "alice",
     label: "Alice — Index fund",
-    allocationFraction: 0.5,
+    principal: 10000,
     annualReturnPct: 6,
     accrualFrequency: "monthly",
     startMonth: "2027-01-01",
@@ -45,34 +45,60 @@ describe("isAccrualMonth", () => {
 });
 
 describe("periodicAccrual", () => {
-  it("applies the fraction and periodic rate to the given opening balance", () => {
-    // 0.5 * 20000 * (12%/12 = 1%) = 100
+  it("applies the periodic rate to the given pot balance", () => {
+    // 20000 * (12%/12 = 1%) = 200
     expect(
-      periodicAccrual(rule({ allocationFraction: 0.5, annualReturnPct: 12, accrualFrequency: "monthly" }), 20000)
-    ).toBeCloseTo(100, 5);
-    // 0.5 * 20000 * (12%/4 = 3%) = 300
+      periodicAccrual(rule({ annualReturnPct: 12, accrualFrequency: "monthly" }), 20000)
+    ).toBeCloseTo(200, 5);
+    // 20000 * (12%/4 = 3%) = 600
     expect(
-      periodicAccrual(rule({ allocationFraction: 0.5, annualReturnPct: 12, accrualFrequency: "quarterly" }), 20000)
-    ).toBeCloseTo(300, 5);
+      periodicAccrual(rule({ annualReturnPct: 12, accrualFrequency: "quarterly" }), 20000)
+    ).toBeCloseTo(600, 5);
   });
 
-  it("scales directly with the opening balance passed in — no independent compounding of its own", () => {
-    const r = rule({ allocationFraction: 1, annualReturnPct: 12, accrualFrequency: "monthly" });
+  it("is a pure function of whatever pot balance is passed in — compounding, if any, is the caller's job", () => {
+    const r = rule({ annualReturnPct: 12, accrualFrequency: "monthly" });
     expect(periodicAccrual(r, 10000)).toBeCloseTo(100, 5);
-    expect(periodicAccrual(r, 10000)).toBeCloseTo(100, 5); // same balance in, same return out, every time
-    expect(periodicAccrual(r, 20000)).toBeCloseTo(200, 5); // balance doubled -> return doubles
+    expect(periodicAccrual(r, 10000)).toBeCloseTo(100, 5); // same pot in, same return out, every time
+    expect(periodicAccrual(r, 20000)).toBeCloseTo(200, 5); // pot doubled -> return doubles
   });
 
-  it("goes negative against a negative opening balance — a real consequence of tracking the whole balance, not a floor at 0", () => {
-    const r = rule({ allocationFraction: 1, annualReturnPct: 12, accrualFrequency: "monthly" });
-    expect(periodicAccrual(r, -10000)).toBeCloseTo(-100, 5);
+  it("applies a negative rate as a loss", () => {
+    const r = rule({ annualReturnPct: -12, accrualFrequency: "monthly" });
+    expect(periodicAccrual(r, 10000)).toBeCloseTo(-100, 5);
   });
 
   it("returns 0 for a 0% rule", () => {
     expect(periodicAccrual(rule({ annualReturnPct: 0 }), 10000)).toBe(0);
   });
 
-  it("returns 0 for a 0 opening balance regardless of rate", () => {
+  it("returns 0 for a 0 pot balance regardless of rate", () => {
     expect(periodicAccrual(rule({ annualReturnPct: 12 }), 0)).toBe(0);
+  });
+});
+
+describe("resolveSavingsPrincipal", () => {
+  it("uses the entered amount as-is for an 'amount' rule, unscaled by the severance base", () => {
+    expect(
+      resolveSavingsPrincipal({ allocation_type: "amount", amount: 15000, percentage: null }, 40000)
+    ).toBe(15000);
+    expect(
+      resolveSavingsPrincipal({ allocation_type: "amount", amount: 15000, percentage: null }, 0)
+    ).toBe(15000);
+  });
+
+  it("resolves a 'percentage' rule as that share of the severance base", () => {
+    expect(
+      resolveSavingsPrincipal({ allocation_type: "percentage", amount: null, percentage: 50 }, 40000)
+    ).toBe(20000);
+  });
+
+  it("treats a null amount/percentage as 0", () => {
+    expect(
+      resolveSavingsPrincipal({ allocation_type: "amount", amount: null, percentage: null }, 40000)
+    ).toBe(0);
+    expect(
+      resolveSavingsPrincipal({ allocation_type: "percentage", amount: null, percentage: null }, 40000)
+    ).toBe(0);
   });
 });

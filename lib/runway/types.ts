@@ -59,15 +59,21 @@ export type SeveranceStream = {
 };
 
 /** One savings/investment rule, fully resolved (amount vs.
- *  percentage-of-severance already settled to a share — see
- *  `SeveranceScenarioSavingsRule`). The return is **not** a segregated pot
- *  compounding on its own — it's `allocationFraction` of the household's
- *  *actual* running balance, recalculated fresh every accrual period
- *  against that period's own opening balance (before that month's other
- *  cash flows), so it rises when income/lump sums land and falls as the
- *  household spends its runway down. Accrues from `startMonth` (the
- *  package's own severance-lump-sum month) at `accrualFrequency`, added to
- *  the projection as income. */
+ *  percentage-of-severance already settled to a EUR principal — see
+ *  `SeveranceScenarioSavingsRule`). Compounds as its **own segregated
+ *  pot**, seeded once from `principal` at `startMonth` (the package's own
+ *  severance-lump-sum month) and growing on its own gross return each
+ *  accrual period from then on — independent of the household's shared
+ *  running balance, so unrelated cash flows (ordinary salary, ALG I,
+ *  another package's severance) never inflate it. It isn't fully walled
+ *  off from spending, though: invested money is still part of the same net
+ *  worth, so `projectRunway` caps every pot's total to the household's
+ *  actual balance each month, shrinking it (proportionally, if there's
+ *  more than one rule) whenever spending would otherwise draw the real
+ *  balance below what the pots claim is invested — a one-way drawdown,
+ *  never bouncing back once spent. Added to the projection as income; the
+ *  principal itself is never re-added, since it's already counted once via
+ *  the severance lump sum landing in the household balance. */
 export type ResolvedSavingsRule = {
   id: string;
   /** The rule's own package's household member — whose tax profile (Soli/
@@ -76,12 +82,12 @@ export type ResolvedSavingsRule = {
   householdMemberId: string;
   /** Display-only — labels this rule's accrual line items in a month breakdown. */
   label: string;
-  /** Share (0–1) of the household's running balance this rule assumes is
-   *  invested — resolved once from amount/percentage at setup (percentage
-   *  → straight fraction; amount → amount ÷ that package's own severance
-   *  base, a one-time calibration), then reapplied every period against
-   *  the real balance rather than tracked as its own fixed sum. */
-  allocationFraction: number;
+  /** EUR amount actually allocated to this rule — resolved once from
+   *  amount/percentage at setup (percentage → that share of the package's
+   *  own net severance base; amount → the amount itself), then compounded
+   *  forward as this rule's own pot rather than reapplied against the
+   *  household's real running balance. */
+  principal: number;
   annualReturnPct: number;
   accrualFrequency: "monthly" | "quarterly" | "annually";
   startMonth: string;

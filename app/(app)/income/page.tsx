@@ -45,6 +45,22 @@ function breakdownLabel(amountsByKey: Map<string, number>, labelFor: (key: strin
   return entries.map(([key, amount]) => `${labelFor(key)} ${formatEUR(amount)}`).join(" · ");
 }
 
+/** Annualizes a per-key recurring-monthly map and adds each key's one-time
+ *  annual amount on top — the union of both maps' keys, since a person/type
+ *  can have one-time income (e.g. a bonus) without any recurring row, or
+ *  vice versa. */
+function annualByKey(
+  monthlyByKey: Map<string, number>,
+  oneTimeByKey: Map<string, number>
+): Map<string, number> {
+  const keys = new Set([...monthlyByKey.keys(), ...oneTimeByKey.keys()]);
+  const result = new Map<string, number>();
+  for (const key of keys) {
+    result.set(key, (monthlyByKey.get(key) ?? 0) * 12 + (oneTimeByKey.get(key) ?? 0));
+  }
+  return result;
+}
+
 /** Small notes shown next to a row's gross amount — a row can have more
  *  than one adjustment at once (e.g. a rental with an overhead reserve),
  *  so this builds a list rather than picking just one. The currency
@@ -236,6 +252,20 @@ export default async function IncomePage() {
   const oneTimeNetByTypeBreakdown = breakdownLabel(oneTimeNetByType, typeLabel);
   const oneTimeGrossByTypeBreakdown = breakdownLabel(oneTimeGrossByType, typeLabel);
 
+  // Annual total = recurring income annualized + one-time bonus/holiday pay
+  // already paid once a year — the same figures behind the monthly and
+  // one-time cards above, just combined into a single per-year view.
+  const totalAnnualNet = totalMonthlyNet * 12 + totalOneTimeNet;
+  const totalAnnualGross = totalMonthlyGross * 12 + totalOneTimeGross;
+  const annualNetByMember = annualByKey(netMonthlyByMember, oneTimeNetByMember);
+  const annualGrossByMember = annualByKey(grossMonthlyByMember, oneTimeGrossByMember);
+  const annualNetByType = annualByKey(netMonthlyByType, oneTimeNetByType);
+  const annualGrossByType = annualByKey(grossMonthlyByType, oneTimeGrossByType);
+  const annualNetByMemberBreakdown = breakdownLabel(annualNetByMember, memberLabel);
+  const annualGrossByMemberBreakdown = breakdownLabel(annualGrossByMember, memberLabel);
+  const annualNetByTypeBreakdown = breakdownLabel(annualNetByType, typeLabel);
+  const annualGrossByTypeBreakdown = breakdownLabel(annualGrossByType, typeLabel);
+
   // Grouped by type (in the app's canonical order), each starting rolled up.
   const rowsByType = new Map<string, Income[]>();
   for (const i of rows) {
@@ -310,6 +340,57 @@ export default async function IncomePage() {
             )}
             {grossMonthlyByTypeBreakdown && (
               <p className="mt-1 text-xs text-muted-foreground">{grossMonthlyByTypeBreakdown}</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Card className="glow-card">
+          <CardHeader>
+            <CardTitle className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+              Total annual (net)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="text-4xl font-extrabold tabular-nums tracking-tight">
+              {formatEUR(totalAnnualNet)}
+            </span>
+            <span className="ml-1 text-sm text-muted-foreground">/yr</span>
+            {annualNetByMemberBreakdown && (
+              <p className="mt-1 text-xs text-muted-foreground">{annualNetByMemberBreakdown}</p>
+            )}
+            {annualNetByTypeBreakdown && (
+              <p className="mt-1 text-xs text-muted-foreground">{annualNetByTypeBreakdown}</p>
+            )}
+            {hasOneTimeBonus && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Recurring income annualized, plus {formatEUR(totalOneTimeNet)}/yr one-time bonus.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="glow-card">
+          <CardHeader>
+            <CardTitle className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+              Total annual (gross)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="text-4xl font-extrabold tabular-nums tracking-tight text-muted-foreground">
+              {formatEUR(totalAnnualGross)}
+            </span>
+            <span className="ml-1 text-sm text-muted-foreground">/yr</span>
+            {annualGrossByMemberBreakdown && (
+              <p className="mt-1 text-xs text-muted-foreground">{annualGrossByMemberBreakdown}</p>
+            )}
+            {annualGrossByTypeBreakdown && (
+              <p className="mt-1 text-xs text-muted-foreground">{annualGrossByTypeBreakdown}</p>
+            )}
+            {hasOneTimeBonus && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Recurring income annualized, plus {formatEUR(totalOneTimeGross)}/yr one-time bonus.
+              </p>
             )}
           </CardContent>
         </Card>

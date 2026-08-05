@@ -19,7 +19,8 @@ import { toMonthlyEquivalent, formatEUR, sortCommitmentsByCost } from "@/lib/fin
 import { getBaselineProfileId } from "@/lib/finance/baseline-profile";
 import { memberShareOfAmount, splitLabel } from "@/lib/finance/splits";
 import { todayISO } from "@/lib/finance/dashboard";
-import { formatDateDisplay } from "@/lib/finance/date-utils";
+import { formatDateDisplay, isActiveOn } from "@/lib/finance/date-utils";
+import { healthInsuranceOutgoings } from "@/lib/finance/health-insurance-outgoing";
 import { COMMITMENT_CATEGORIES, COMMITMENT_FREQUENCIES } from "@/lib/types";
 import type { Commitment, CommitmentSplit, HouseholdMember, Property } from "@/lib/types";
 
@@ -29,6 +30,10 @@ const frequencyLabel = (v: string) =>
   COMMITMENT_FREQUENCIES.find((f) => f.value === v)?.label ?? v;
 
 const ENDING_SOON_DAYS = 60;
+
+/** Synthetic health-insurance rows (see health-insurance-outgoing.ts) use this
+ *  id prefix and have no backing DB row — no edit/delete affordances. */
+const isSyntheticHealthInsurance = (c: Commitment) => c.id.startsWith("health-insurance-");
 
 /** Presentational only — derives a real tri-state from start/end dates already on the row. */
 function commitmentStatus(c: Commitment, onDate: string): { label: string; dotClassName: string } {
@@ -65,13 +70,16 @@ export default async function CommitmentsPage({
 
   const [{ data: commitments }, { data: members }, { data: properties }] = await Promise.all([
     query,
-    supabase.from("household_members").select("id, name, created_at"),
+    supabase
+      .from("household_members")
+      .select(
+        "id, name, created_at, statutory_health_insurance, count_private_health_insurance_as_outgoing, private_health_insurance_monthly_premium"
+      ),
     supabase.from("properties").select("id, profile_id, name, address, notes, end_date"),
   ]);
   let rows = (commitments ?? []) as Commitment[];
-  const memberById = new Map(
-    ((members ?? []) as HouseholdMember[]).map((m) => [m.id, m.name])
-  );
+  const householdMembers = (members ?? []) as HouseholdMember[];
+  const memberById = new Map(householdMembers.map((m) => [m.id, m.name]));
 
   const { data: splitRows } = await supabase
     .from("commitment_splits")
@@ -86,6 +94,24 @@ export default async function CommitmentsPage({
     ]);
   }
 
+  // Synthetic "private health insurance" outgoing (never a real DB row — see
+  // lib/finance/health-insurance-outgoing.ts) folded in so this page's total
+  // matches the Overview dashboard's, which already includes it. Respects
+  // the category filter since every synthetic row is "insurance". Each gets
+  // a 100%-to-that-member virtual split so the owner filter attributes it
+  // correctly instead of falling into the unattributed "household" bucket.
+  const healthInsuranceCommitments =
+    !category || category === "insurance"
+      ? healthInsuranceOutgoings(householdMembers, baselineProfileId)
+      : [];
+  for (const c of healthInsuranceCommitments) {
+    const memberId = c.id.replace("health-insurance-", "");
+    splitsByCommitment.set(c.id, [
+      { id: `virtual-${c.id}`, commitment_id: c.id, household_member_id: memberId, percentage: 100 },
+    ]);
+  }
+  rows = [...rows, ...healthInsuranceCommitments];
+
   if (owner === "household") {
     rows = rows.filter((c) => (splitsByCommitment.get(c.id) ?? []).length === 0);
   } else if (owner === "non-household") {
@@ -99,14 +125,17 @@ export default async function CommitmentsPage({
   // Only an actual person filter prorates to their share — "household" and
   // "non-household" are aggregate views, not one person's slice.
   const isMemberFilter = !!owner && memberById.has(owner);
+  const onDate = todayISO();
 
+  // Matches Overview's activeCommitments() — a not-yet-started or already-ended
+  // commitment (see its Status badge below) doesn't count toward the live total,
+  // so this figure and the Overview surplus/deficit stay in agreement.
   const totalMonthly = rows.reduce((sum, c) => {
+    if (!isActiveOn(c.start_date, c.end_date, onDate)) return sum;
     const monthly = toMonthlyEquivalent(c.amount, c.frequency);
     const splits = splitsByCommitment.get(c.id) ?? [];
     return sum + (isMemberFilter ? memberShareOfAmount(monthly, splits, owner!) : monthly);
   }, 0);
-
-  const onDate = todayISO();
 
   // Grouped by property (alphabetical), then a final "No property" group —
   // costs within each group ordered biggest-first, same as everywhere else.
@@ -168,6 +197,9 @@ export default async function CommitmentsPage({
               {formatEUR(totalMonthly)}
             </span>
             <span className="ml-1 text-sm text-muted-foreground">/mo</span>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Active commitments only — matches the Overview surplus/deficit figure.
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -211,7 +243,11 @@ export default async function CommitmentsPage({
               </TableHeader>
               {groups.map((group) => {
                 const groupMonthly = group.commitments.reduce(
-                  (sum, c) => sum + toMonthlyEquivalent(c.amount, c.frequency),
+                  (sum, c) =>
+                    sum +
+                    (isActiveOn(c.start_date, c.end_date, onDate)
+                      ? toMonthlyEquivalent(c.amount, c.frequency)
+                      : 0),
                   0
                 );
                 return (
@@ -242,6 +278,11 @@ export default async function CommitmentsPage({
                                   Discretionary
                                 </Badge>
                               )}
+                              {isSyntheticHealthInsurance(c) && (
+                                <Badge variant="outline" className="text-xs font-normal text-muted-foreground">
+                                  Auto — from Household
+                                </Badge>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell>{categoryLabel(c.category)}</TableCell>
@@ -261,18 +302,35 @@ export default async function CommitmentsPage({
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                aria-label="Edit"
-                                render={<Link href={`/commitments/${c.id}/edit`} />}
-                              >
-                                <Pencil className="size-4" />
-                              </Button>
-                              <DeleteButton
-                                action={deleteCommitment.bind(null, c.id)}
-                                confirmMessage={`Delete "${c.name}"?`}
-                              />
+                              {isSyntheticHealthInsurance(c) ? (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label="Edit in Household"
+                                  render={
+                                    <Link
+                                      href={`/household/${c.id.replace("health-insurance-", "")}/edit`}
+                                    />
+                                  }
+                                >
+                                  <Pencil className="size-4" />
+                                </Button>
+                              ) : (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    aria-label="Edit"
+                                    render={<Link href={`/commitments/${c.id}/edit`} />}
+                                  >
+                                    <Pencil className="size-4" />
+                                  </Button>
+                                  <DeleteButton
+                                    action={deleteCommitment.bind(null, c.id)}
+                                    confirmMessage={`Delete "${c.name}"?`}
+                                  />
+                                </>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>

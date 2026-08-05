@@ -29,7 +29,13 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveScenario, buildAnnualTaxSummaries } from "../resolve-scenario";
 import { deleteScenario } from "../actions";
 import { duplicateScenario } from "../duplicate-actions";
-import { projectRunway, projectDoNothingBaseline, sensitivityAnalysis, precedingMonthsSeries } from "@/lib/runway";
+import {
+  projectRunway,
+  projectDoNothingBaseline,
+  sensitivityAnalysis,
+  precedingMonthsSeries,
+  resolveSavingsPrincipal,
+} from "@/lib/runway";
 import { getBaselineRunwayInputs } from "@/lib/finance/baseline-profile";
 import { pensionWartezeitTimeline } from "@/lib/severance";
 import { addScenarioEvent, deleteScenarioEvent } from "../event-actions";
@@ -277,12 +283,10 @@ export default async function ScenarioDetailPage({
     packageSummaries.map((s) => [s.package.id, s.netSeverance ?? s.severanceGross])
   );
   const resolvedAmountByRule = new Map(
-    savingsRules.map((rule) => {
-      const base = severanceBaseByPackage.get(rule.package_id) ?? 0;
-      const resolved =
-        rule.allocation_type === "amount" ? (rule.amount ?? 0) : ((rule.percentage ?? 0) / 100) * base;
-      return [rule.id, resolved];
-    })
+    savingsRules.map((rule) => [
+      rule.id,
+      resolveSavingsPrincipal(rule, severanceBaseByPackage.get(rule.package_id) ?? 0),
+    ])
   );
   const packageOptions: PackageAllocationOption[] = packageSummaries.map((s) => ({
     id: s.package.id,
@@ -848,9 +852,13 @@ export default async function ScenarioDetailPage({
               </Card>
             </TabsPanel>
 
-            {/* Savings & Investment — set aside part of a severance lump sum;
-                the accrued return (never the principal, already counted once
-                via the lump sum) shows up as income in the projection. */}
+            {/* Savings & Investment — set aside part of a severance lump sum
+                into its own segregated pot; the accrued return (never the
+                principal, already counted once via the lump sum) shows up
+                as income in the projection. Unrelated cash flows never
+                inflate it, but it isn't fully walled off either — if
+                overall spending draws the household's real balance below
+                what's invested, the pot is drawn down to match. */}
             <TabsPanel value="savings">
               <Card>
                 <CardHeader>
@@ -867,9 +875,11 @@ export default async function ScenarioDetailPage({
                   ) : (
                     <>
                       <p className="text-sm text-muted-foreground">
-                        Each rule&apos;s return applies to its share of the household&apos;s actual projected
-                        balance each period — not a separate account that only ever grows. It rises when
-                        income or a lump sum lands, and falls as the household spends its runway down.
+                        Each rule sets aside a fixed amount (or a % of that person&apos;s own severance) into
+                        its own pot, which compounds on its own return from there — ordinary income never
+                        inflates it. It&apos;s not fully walled off, though: if overall spending draws the
+                        household&apos;s real balance below what&apos;s invested, the pot is drawn down to
+                        match, since that money was never in a separate untouchable account.
                       </p>
                       <div className="flex flex-wrap gap-4 text-sm">
                         {packageOptions.map((p) => (
@@ -896,6 +906,9 @@ export default async function ScenarioDetailPage({
                               <TableHead scope="col" className="text-right">
                                 Return
                               </TableHead>
+                              <TableHead scope="col" className="text-right">
+                                Example, /mo
+                              </TableHead>
                               <TableHead scope="col">Accrued</TableHead>
                               <TableHead scope="col" className="w-12 text-right">
                                 &nbsp;
@@ -906,6 +919,7 @@ export default async function ScenarioDetailPage({
                             {savingsRules.map((rule) => {
                               const option = packageOptions.find((p) => p.id === rule.package_id);
                               const resolved = resolvedAmountByRule.get(rule.id) ?? 0;
+                              const exampleMonthly = (resolved * rule.annual_return_pct) / 100 / 12;
                               return (
                                 <TableRow key={rule.id}>
                                   <TableCell className="font-medium">{option?.memberName ?? "—"}</TableCell>
@@ -917,6 +931,9 @@ export default async function ScenarioDetailPage({
                                   </TableCell>
                                   <TableCell className="text-right tabular-nums">
                                     {rule.annual_return_pct}%/yr
+                                  </TableCell>
+                                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                                    {formatEUR(exampleMonthly)}/mo
                                   </TableCell>
                                   <TableCell className="text-muted-foreground">
                                     {ACCRUAL_FREQUENCIES.find((f) => f.value === rule.accrual_frequency)?.label ??
@@ -933,6 +950,16 @@ export default async function ScenarioDetailPage({
                             })}
                           </TableBody>
                         </Table>
+                      )}
+                      {savingsRules.length > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          Example, /mo is the pot&apos;s starting gross return spread evenly across the year
+                          (allocation × annual return ÷ 12) — a steady-state estimate before tax, not the
+                          exact figure any single accrual period pays (that depends on the accrual frequency
+                          above, grows over time as the pot compounds, and falls if the household&apos;s own
+                          spending ever draws the pot down — see the Cash Flow tab for the actual month-by-month
+                          figure).
+                        </p>
                       )}
 
                       <AddDisclosure label="Add savings rule" icon={Plus}>

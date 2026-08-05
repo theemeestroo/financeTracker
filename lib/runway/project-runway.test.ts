@@ -85,7 +85,7 @@ function savingsRule(overrides: Partial<ResolvedSavingsRule>): ResolvedSavingsRu
     id: "sr1",
     householdMemberId: "m1",
     label: "Member — Investment",
-    allocationFraction: 1,
+    principal: 10000,
     annualReturnPct: 12,
     accrualFrequency: "monthly",
     startMonth: "2026-01-01",
@@ -411,17 +411,16 @@ describe("projectRunway — multiple severance streams", () => {
 });
 
 describe("projectRunway — savings/investment rules", () => {
-  it("applies the return to the household's actual opening balance each month, not a fixed principal", () => {
+  it("compounds on its own pot, seeded from principal, independent of the household's starting balance", () => {
     const result = projectRunway({
       ...baseScenario,
-      startingBalance: 20000,
-      savingsRules: [savingsRule({ allocationFraction: 1, annualReturnPct: 12, accrualFrequency: "monthly" })],
+      startingBalance: 999999, // arbitrary — must not affect the pot below
+      savingsRules: [savingsRule({ principal: 20000, annualReturnPct: 12, accrualFrequency: "monthly" })],
       horizonMonths: 3,
     });
 
-    // 12%/12 = 1%/mo of that month's *opening* balance — which is itself
-    // last month's closing balance (the accrual feeds back in), so this
-    // still grows month over month, but by tracking the real balance.
+    // 12%/12 = 1%/mo of the rule's own pot — which starts at principal and
+    // grows on its own prior periods' return, not the household balance.
     expect(result.series[0].breakdown?.inflows).toEqual([
       {
         label: "Member — Investment — investment return",
@@ -431,49 +430,118 @@ describe("projectRunway — savings/investment rules", () => {
         investmentIncome: true,
       },
     ]);
-    expect(result.series[1].breakdown?.inflows[0].amount).toBeCloseTo(202, 5); // 20200 * 1%
-    expect(result.series[2].breakdown?.inflows[0].amount).toBeCloseTo(204.02, 5); // 20402 * 1%
+    expect(result.series[1].breakdown?.inflows[0].amount).toBeCloseTo(202, 5); // pot grew to 20200
+    expect(result.series[2].breakdown?.inflows[0].amount).toBeCloseTo(204.02, 5); // pot grew to 20402.02
   });
 
-  it("shrinks the accrual when other spending draws the balance down", () => {
+  it("keeps accruing on its own pot, unaffected by other spending, as long as the balance stays above the pots' total", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 50000,
+      phases: [
+        { startDate: "2026-01-01", profile: { commitments: [commitment({ amount: 2000 })], income: [] } },
+      ],
+      savingsRules: [savingsRule({ principal: 10000, annualReturnPct: 12, accrualFrequency: "monthly" })],
+      horizonMonths: 2,
+    });
+
+    // month 0: pot 10000 -> accrual 100, unaffected by the -2000 rent hitting the household balance separately.
+    const month0Accrual = result.series[0].breakdown?.inflows.find((i) => i.label.includes("investment return"));
+    expect(month0Accrual?.amount).toBeCloseTo(100, 5);
+    expect(result.series[0].balance).toBeCloseTo(50000 - 2000 + 100, 5); // household balance still reflects the rent
+    // month 1: pot compounded on its own growth (10000 + 100 = 10100) -> accrual 101 — the household still has
+    // 48100 in balance, comfortably above the pot's 10100 total, so nothing draws the pot down.
+    const month1Accrual = result.series[1].breakdown?.inflows.find((i) => i.label.includes("investment return"));
+    expect(month1Accrual?.amount).toBeCloseTo(101, 5);
+  });
+
+  it("caps the pot to the household's actual balance once spending draws it below the pot's total, shrinking future accrual too", () => {
     const result = projectRunway({
       ...baseScenario,
       startingBalance: 10000,
       phases: [
-        { startDate: "2026-01-01", profile: { commitments: [commitment({ amount: 2000 })], income: [] } },
+        { startDate: "2026-01-01", profile: { commitments: [commitment({ amount: 3000 })], income: [] } },
       ],
-      savingsRules: [savingsRule({ allocationFraction: 1, annualReturnPct: 12, accrualFrequency: "monthly" })],
+      savingsRules: [savingsRule({ principal: 10000, annualReturnPct: 12, accrualFrequency: "monthly" })],
       horizonMonths: 2,
     });
 
-    // month 0: opening 10000 -> accrual 100; rent -2000 -> balance 10000 - 2000 + 100 = 8100.
+    // month 0: pot still compounds normally off its own prior value (10000 -> accrual 100) — a period's own
+    // accrual is never rewritten after the fact, only the pot's value going forward.
     const month0Accrual = result.series[0].breakdown?.inflows.find((i) => i.label.includes("investment return"));
     expect(month0Accrual?.amount).toBeCloseTo(100, 5);
-    expect(result.series[0].balance).toBeCloseTo(8100, 5);
-    // month 1: opening 8100 (not 10100, which is what it would be without the rent) -> accrual 81, not 101.
+    // -3000 rent + 100 return leaves the real balance at 7100 — below the pot's own (10000 + 100 =) 10100 total,
+    // so the pot gets capped down to 7100 (there's no other money left to have covered the rent from).
+    expect(result.series[0].balance).toBeCloseTo(7100, 5);
+    // month 1: this month's accrual is 1% of the *capped* 7100 pot (71), not the uncapped 10100 (which would be 101).
     const month1Accrual = result.series[1].breakdown?.inflows.find((i) => i.label.includes("investment return"));
-    expect(month1Accrual?.amount).toBeCloseTo(81, 5);
+    expect(month1Accrual?.amount).toBeCloseTo(71, 5);
+  });
+
+  it("scales every pot down proportionally when spending draws the balance below their combined total", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 9000,
+      phases: [
+        { startDate: "2026-01-01", profile: { commitments: [commitment({ amount: 5500 })], income: [] } },
+      ],
+      savingsRules: [
+        savingsRule({ id: "a", label: "Alice — Fund", principal: 6000, annualReturnPct: 12 }),
+        savingsRule({ id: "b", label: "Bob — Deposit", principal: 3000, annualReturnPct: 12 }),
+      ],
+      horizonMonths: 2,
+    });
+
+    // month 0: both pots still accrue off their own untouched principal (6000 -> 60, 3000 -> 30).
+    const month0 = result.series[0].breakdown?.inflows ?? [];
+    expect(month0.find((i) => i.label.includes("Alice"))?.amount).toBeCloseTo(60, 5);
+    expect(month0.find((i) => i.label.includes("Bob"))?.amount).toBeCloseTo(30, 5);
+    // -5500 rent + 90 combined return leaves the real balance at 3590 — well below the pots' combined
+    // (6060 + 3030 =) 9090 total, so both pots are scaled down by the same ratio (balance ÷ combined pots).
+    expect(result.series[0].balance).toBeCloseTo(3590, 5);
+    // month 1: each pot's accrual reflects its own scaled-down value, still in the original 2:1 ratio.
+    const month1 = result.series[1].breakdown?.inflows ?? [];
+    expect(month1.find((i) => i.label.includes("Alice"))?.amount).toBeCloseTo(23.93, 1);
+    expect(month1.find((i) => i.label.includes("Bob"))?.amount).toBeCloseTo(11.97, 1);
+  });
+
+  it("wipes the pot to 0 once the household balance itself goes negative, and it never recovers on its own", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 1000,
+      phases: [
+        { startDate: "2026-01-01", profile: { commitments: [commitment({ amount: 5000 })], income: [] } },
+      ],
+      savingsRules: [savingsRule({ principal: 1000, annualReturnPct: 12, accrualFrequency: "monthly" })],
+      horizonMonths: 2,
+    });
+
+    expect(result.series[0].balance).toBeCloseTo(1000 - 5000 + 10, 5); // -3990 — deep negative
+    // month 1: the pot was capped to 0 (there's no money left, let alone invested money), so there's nothing
+    // left to accrue a return on — no investment-return line item at all this month.
+    const month1Accrual = result.series[1].breakdown?.inflows.find((i) => i.label.includes("investment return"));
+    expect(month1Accrual).toBeUndefined();
   });
 
   it("only accrues on the rule's own period boundaries (quarterly), not every month", () => {
     const result = projectRunway({
       ...baseScenario,
-      startingBalance: 4000,
-      savingsRules: [savingsRule({ allocationFraction: 1, annualReturnPct: 8, accrualFrequency: "quarterly" })],
+      startingBalance: 4000, // backs the pot's principal so the balance-cap below never kicks in here
+      savingsRules: [savingsRule({ principal: 4000, annualReturnPct: 8, accrualFrequency: "quarterly" })],
       horizonMonths: 4,
     });
     expect(result.series[0].breakdown?.inflows).toHaveLength(1); // month 0: accrual (8%/4 = 2% of 4000 = 80)
     expect(result.series[0].breakdown?.inflows[0].amount).toBeCloseTo(80, 5);
     expect(result.series[1].breakdown?.inflows).toHaveLength(0);
     expect(result.series[2].breakdown?.inflows).toHaveLength(0);
-    expect(result.series[3].breakdown?.inflows).toHaveLength(1); // +3 months, opening 4080 -> 81.6
+    expect(result.series[3].breakdown?.inflows).toHaveLength(1); // +3 months, pot grew to 4080 -> 81.6
     expect(result.series[3].breakdown?.inflows[0].amount).toBeCloseTo(81.6, 5);
   });
 
   it("doesn't accrue before the rule's own startMonth", () => {
     const result = projectRunway({
       ...baseScenario,
-      startingBalance: 5000,
+      startingBalance: 10000, // backs the default rule's principal (see savingsRule())
       savingsRules: [savingsRule({ startMonth: "2026-03-01" })],
       horizonMonths: 3,
     });
@@ -482,20 +550,19 @@ describe("projectRunway — savings/investment rules", () => {
     expect(result.series[2].breakdown?.inflows).toHaveLength(1);
   });
 
-  it("sums multiple rules independently against the same shared balance in the same month", () => {
+  it("sums multiple rules independently, each against its own principal, in the same month", () => {
     const result = projectRunway({
       ...baseScenario,
-      startingBalance: 10000,
       savingsRules: [
-        savingsRule({ id: "a", label: "Alice — Fund", allocationFraction: 1, annualReturnPct: 12 }),
-        savingsRule({ id: "b", label: "Bob — Deposit", allocationFraction: 0.5, annualReturnPct: 6 }),
+        savingsRule({ id: "a", label: "Alice — Fund", principal: 10000, annualReturnPct: 12 }),
+        savingsRule({ id: "b", label: "Bob — Deposit", principal: 5000, annualReturnPct: 6 }),
       ],
       horizonMonths: 1,
     });
     expect(result.series[0].breakdown?.inflows).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ label: "Alice — Fund — investment return", amount: 100 }), // 1 * 10000 * 1%
-        expect.objectContaining({ label: "Bob — Deposit — investment return", amount: 25 }), // 0.5 * 10000 * 0.5%
+        expect.objectContaining({ label: "Alice — Fund — investment return", amount: 100 }), // 10000 * 1%
+        expect.objectContaining({ label: "Bob — Deposit — investment return", amount: 25 }), // 5000 * 0.5%
       ])
     );
   });
@@ -503,16 +570,15 @@ describe("projectRunway — savings/investment rules", () => {
   it("nets the accrual via Abgeltungsteuer when the rule's member has a tax profile", () => {
     const result = projectRunway({
       ...baseScenario,
-      startingBalance: 100000,
       taxProfileByMember: new Map([["m1", taxProfile]]),
       savingsRules: [
-        savingsRule({ allocationFraction: 1, annualReturnPct: 12, accrualFrequency: "monthly", householdMemberId: "m1" }),
+        savingsRule({ principal: 100000, annualReturnPct: 12, accrualFrequency: "monthly", householdMemberId: "m1" }),
       ],
       horizonMonths: 1,
     });
 
     const item = result.series[0].breakdown?.inflows.find((i) => i.label.includes("investment return"));
-    const grossAccrued = 100000 * 0.01; // 12%/12 of the opening balance
+    const grossAccrued = 100000 * 0.01; // 12%/12 of the pot
     // Sparerpauschbetrag is annual — a monthly rule annualizes (×12) before
     // netting, then de-annualizes the result back to this month's share.
     const netAnnual = calculateCapitalGainsTax(grossAccrued * 12, taxProfile, 2026).netAnnual;
@@ -523,15 +589,14 @@ describe("projectRunway — savings/investment rules", () => {
     expect(item?.householdMemberId).toBe("m1");
   });
 
-  it("a negative accrual (interest cost on a negative balance) is never taxed", () => {
+  it("a negative accrual (a loss on the pot) is never taxed", () => {
     const result = projectRunway({
       ...baseScenario,
-      startingBalance: -100000,
       taxProfileByMember: new Map([["m1", taxProfile]]),
-      savingsRules: [savingsRule({ allocationFraction: 1, annualReturnPct: 12, householdMemberId: "m1" })],
+      savingsRules: [savingsRule({ principal: 100000, annualReturnPct: -12, householdMemberId: "m1" })],
       horizonMonths: 1,
     });
     const item = result.series[0].breakdown?.outflows.find((i) => i.label.includes("investment return"));
-    expect(item?.amount).toBeCloseTo(1000, 5); // untaxed — full -1% of -100000 shown as an outflow
+    expect(item?.amount).toBeCloseTo(1000, 5); // untaxed — full -1% of the 100000 pot shown as an outflow
   });
 });

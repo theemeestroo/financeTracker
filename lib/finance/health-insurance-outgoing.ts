@@ -15,12 +15,14 @@ const ALWAYS_ACTIVE_FROM = "2000-01-01";
  * already shows up as extra net pay, so without this the household's net
  * income silently runs high with no corresponding outgoing anywhere.
  *
- * These are **never persisted and never shown in the Commitments page's own
- * table** — a synthetic row can't honestly offer that table's edit/delete
- * affordances. They exist only to be folded into aggregate totals and
- * category breakdowns (the Overview dashboard; severance-scenario phases
- * via `resolve-scenario.ts`), always under the "insurance" category and
- * always essential (this is not a discretionary cost a sensitivity panel
+ * These are **never persisted** — the Commitments page (`app/(app)/commitments/page.tsx`)
+ * folds them into its own rows read-only, badged "Auto — from Household" and
+ * linking to the household member's edit page instead of offering this
+ * table's normal edit/delete affordances, since a synthetic row has no
+ * backing DB row to edit or delete. They're also folded into aggregate
+ * totals and category breakdowns (the Overview dashboard; severance-scenario
+ * phases via `resolve-scenario.ts`), always under the "insurance" category
+ * and always essential (this is not a discretionary cost a sensitivity panel
  * should ever suggest cutting).
  *
  * `cutoffByMember` lets a caller end-date one specific member's synthetic

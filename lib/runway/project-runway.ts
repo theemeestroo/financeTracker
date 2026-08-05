@@ -24,10 +24,14 @@ const DEFAULT_HORIZON_MONTHS = 120;
  * supplies the active commitments/income — a wholesale profile swap, not an
  * incremental diff. One-off commitments and scenario events land in their
  * own occurrence month only. Savings/investment rules (`lib/runway/savings.ts`)
- * apply their own return rate to a share of the *actual* running balance on
- * each accrual boundary from their own start month — not a segregated pot
- * compounding independently, so the accrued income rises and falls with the
- * household's real cash position.
+ * compound as their own segregated pot — seeded from `principal`, growing
+ * on their own return each accrual boundary from their own start month —
+ * so unrelated cash flows (salary, ALG I, another package's severance)
+ * never inflate the accrued income. Each month's end, though, every pot is
+ * capped to the household's actual balance (shrunk proportionally if it's
+ * more than one pot), since invested money is still part of the same net
+ * worth: if overall spending draws the real balance below what the pots
+ * claim is invested, the shortfall must have come out of the pots too.
  */
 export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult {
   if (scenario.phases.length === 0 || scenario.severances.length === 0) {
@@ -53,6 +57,10 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
   }));
 
   let balance = scenario.startingBalance;
+  // Each savings rule's own segregated pot, seeded from its resolved
+  // principal — compounds on its own gross accrual, independent of
+  // `balance` above (see ResolvedSavingsRule's own comment for why).
+  const pots = new Map(scenario.savingsRules.map((rule) => [rule.id, rule.principal]));
   const series: RunwayPoint[] = [];
   let depletionDate: string | null = null;
   let lowestBalance = Infinity;
@@ -147,20 +155,20 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
       });
     }
 
-    // `balance` here is still this month's *opening* value — it isn't
-    // mutated until `balance += monthDelta` below, so every savings rule
-    // sees the same "start amount" for the month regardless of where in
-    // this item-building sequence it runs, including relative to this same
-    // month's own lump sum/income/commitments.
+    // Each rule accrues against its own pot (seeded from principal, grown
+    // by its own prior periods' gross return) — not `balance` above, so
+    // this month's other income/commitments/lump sums never feed into it.
     for (const rule of scenario.savingsRules) {
       if (!isAccrualMonth(rule, date)) continue;
-      const grossAccrued = periodicAccrual(rule, balance);
+      const potBalance = pots.get(rule.id) ?? rule.principal;
+      const grossAccrued = periodicAccrual(rule, potBalance);
       if (grossAccrued === 0) continue;
+      pots.set(rule.id, potBalance + grossAccrued);
 
       // Investment returns are taxable income (Abgeltungsteuer) — a real
       // gain is netted via the rule's own household member's tax profile;
-      // a negative accrual (interest cost on a negative balance) isn't a
-      // taxable event and passes through unchanged, same as any other cost.
+      // a negative accrual (a loss on the pot) isn't a taxable event and
+      // passes through unchanged, same as any other cost.
       // The Sparerpauschbetrag is an *annual* allowance, so this
       // annualizes the period's own gross first (same steady-state
       // approximation `calculateNetIncome` already uses for wage income)
@@ -184,6 +192,24 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
 
     const monthDelta = items.reduce((sum, i) => sum + i.amount, 0);
     balance += monthDelta;
+
+    // Invested money isn't a separate untouchable account — it's part of
+    // the same net worth `balance` tracks. If this month's spending has
+    // drawn the household's actual balance below what the pots claim is
+    // invested, the shortfall can only have come out of the pots
+    // themselves, so scale every pot down (proportionally, if there's more
+    // than one) until their total fits inside the real balance — wiped to
+    // 0 entirely if balance itself has gone negative. This only shrinks
+    // pots going forward; it never rewrites a period's already-recorded
+    // accrual, and a pot never grows back on its own once drawn down.
+    const totalPots = Array.from(pots.values()).reduce((sum, v) => sum + v, 0);
+    if (totalPots > 0 && balance < totalPots) {
+      const scale = Math.max(0, balance) / totalPots;
+      for (const [ruleId, potValue] of pots) {
+        pots.set(ruleId, potValue * scale);
+      }
+    }
+
     const breakdown = {
       inflows: items.filter((i) => i.amount > 0),
       outflows: items.filter((i) => i.amount < 0).map((i) => ({ label: i.label, amount: -i.amount })),

@@ -27,7 +27,7 @@ import { addDays, addMonths, ageInYears } from "@/lib/finance/date-utils";
 import type { Split } from "@/lib/finance/splits";
 import { toTaxProfile } from "@/lib/finance/tax-profile-context";
 import { healthInsuranceOutgoings } from "@/lib/finance/health-insurance-outgoing";
-import { aggregateAnnualIncomeByMember, precedingMonthsSeries } from "@/lib/runway";
+import { aggregateAnnualIncomeByMember, precedingMonthsSeries, resolveSavingsPrincipal } from "@/lib/runway";
 import { combinedIncomeBreakdown } from "@/lib/finance/income-gross";
 import type {
   ResolvedIncome,
@@ -452,9 +452,9 @@ export async function resolveScenario(
   // Savings/investment rules (per-package — see the migration's own
   // comment for why) — resolve amount-vs-percentage against that package's
   // own severance base (net, same net-first/gross-fallback convention as
-  // netSeveranceLumpSum below) into a *share* of the household's running
-  // balance (not a flat EUR principal — the return applies to the actual
-  // balance each period, see lib/runway/savings.ts), and anchor accrual to
+  // netSeveranceLumpSum below) into a flat EUR principal, which then
+  // compounds forward as its own segregated pot independent of the
+  // household's running balance (see lib/runway/savings.ts), anchored to
   // the same gardenLeaveEndDate the health-insurance cutoff above uses —
   // the month the lump sum actually lands.
   const packageSummaryById = new Map(packageSummaries.map((s) => [s.package.id, s]));
@@ -463,18 +463,13 @@ export async function resolveScenario(
       const summary = packageSummaryById.get(rule.package_id);
       if (!summary) return null; // package deleted out from under an orphaned rule
       const severanceBase = summary.netSeverance ?? summary.severanceGross;
-      const allocationFraction =
-        rule.allocation_type === "amount"
-          ? severanceBase > 0
-            ? (rule.amount ?? 0) / severanceBase
-            : 0
-          : (rule.percentage ?? 0) / 100;
+      const principal = resolveSavingsPrincipal(rule, severanceBase);
       const memberName = memberById.get(summary.package.household_member_id)?.name ?? "—";
       return {
         id: rule.id,
         householdMemberId: summary.package.household_member_id,
         label: `${memberName} — ${rule.name}`,
-        allocationFraction,
+        principal,
         annualReturnPct: rule.annual_return_pct,
         accrualFrequency: rule.accrual_frequency,
         startMonth: summary.gardenLeaveEndDate,

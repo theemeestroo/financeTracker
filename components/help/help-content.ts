@@ -146,6 +146,10 @@ export const HELP_ARTICLES: HelpArticle[] = [
         type: "p",
         text: "Non-EUR income (currently EUR or GBP) converts to EUR using a manually-entered exchange rate — this app doesn't fetch live rates.",
       },
+      {
+        type: "p",
+        text: "Alongside the monthly net/gross totals, the income page shows a total annual figure (recurring income annualized, plus any one-time bonus/holiday pay on top) — each broken down by household member and by income type whenever more than one contributes, so you can see at a glance who or what a year's income actually comes from.",
+      },
       { type: "p", text: "Export the current income list as CSV from the income page." },
     ],
   },
@@ -276,7 +280,11 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "The return applies to a share of the household's actual projected balance each period it accrues — not a separate account that only ever grows. It rises when income or a lump sum lands and falls as the household spends its runway down, including going negative if the balance itself does. Only the return shows up as income in the projection; the principal is never added twice, since it's already counted once as part of the severance lump sum itself.",
+        text: "The allocated amount compounds on its own, in its own pot, from the return rate and accrual frequency you set — ordinary household income never inflates it. It isn't fully walled off from spending, though: that money was never moved into a separate untouchable account, so if the household's overall spending draws its real balance below what's currently invested, the pot is drawn down to match (and stays down — it doesn't bounce back on its own later). Only the return shows up as income in the projection; the principal is never added twice, since it's already counted once as part of the severance lump sum itself.",
+      },
+      {
+        type: "p",
+        text: "Each rule's table row shows an example monthly figure (allocation × annual return ÷ 12) — a steady-state estimate of what the rule is worth per month at the start, before tax. It's for a quick sense of scale, not the exact amount any single accrual period pays: that depends on the accrual frequency, and grows over time as the pot compounds.",
       },
       {
         type: "p",
