@@ -5,8 +5,10 @@ import type {
   ScenarioEventType,
   ScenarioItemScope,
   SeveranceGlobalEventOverride,
+  SeveranceGlobalPropertyEndOverride,
   SeveranceGlobalSavingsRuleOverride,
   SeveranceScenarioEvent,
+  SeveranceScenarioPropertyEnd,
   SeveranceScenarioSavingsRule,
 } from "@/lib/types";
 
@@ -80,6 +82,65 @@ export function mergeScenarioEvents(
         recurring_frequency: e.recurring_frequency,
         recurring_tax_profile_id: e.recurring_tax_profile_id,
         recurring_end_date: e.recurring_end_date,
+        isOverridden,
+      },
+    ];
+  });
+
+  return [...scenarioMerged, ...globalMerged];
+}
+
+/**
+ * One scenario's merged view of a property end — mirrors `MergedScenarioEvent`
+ * above, superseding `end_date` (a date, not a numeric amount) via a
+ * scenario-local override instead. When both a scenario-scoped and an
+ * (unsuppressed) global row exist for the *same* `property_id` — possible
+ * since the two are independent rows, not usually expected together outside
+ * "duplicate into this scenario" (which suppresses the global row) — the
+ * caller (`resolve-scenario.ts`, the scenario detail page) prefers the
+ * scenario-scoped row when collapsing this list down to one end date per
+ * property, same "more specific wins" reasoning as everywhere else scope
+ * layers.
+ */
+export type MergedPropertyEnd = {
+  id: string;
+  scope: ScenarioItemScope;
+  property_id: string;
+  end_date: string;
+  isOverridden: boolean;
+};
+
+/**
+ * Merges this scenario's own property-ends with every global property-end
+ * that still applies to it. A global row is dropped entirely when its
+ * override for this scenario has `suppressed = true`, same reasoning as
+ * `mergeScenarioEvents`.
+ */
+export function mergeScenarioPropertyEnds(
+  scenarioPropertyEnds: SeveranceScenarioPropertyEnd[],
+  globalPropertyEnds: SeveranceScenarioPropertyEnd[],
+  overrides: SeveranceGlobalPropertyEndOverride[]
+): MergedPropertyEnd[] {
+  const overrideByGlobalId = new Map(overrides.map((o) => [o.global_property_end_id, o]));
+
+  const scenarioMerged: MergedPropertyEnd[] = scenarioPropertyEnds.map((pe) => ({
+    id: pe.id,
+    scope: "scenario",
+    property_id: pe.property_id,
+    end_date: pe.end_date,
+    isOverridden: false,
+  }));
+
+  const globalMerged: MergedPropertyEnd[] = globalPropertyEnds.flatMap((pe) => {
+    const override = overrideByGlobalId.get(pe.id);
+    if (override?.suppressed) return [];
+    const isOverridden = override?.end_date != null;
+    return [
+      {
+        id: pe.id,
+        scope: "global",
+        property_id: pe.property_id,
+        end_date: isOverridden ? override!.end_date! : pe.end_date,
         isOverridden,
       },
     ];

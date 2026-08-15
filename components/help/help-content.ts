@@ -183,7 +183,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "Duplicate (next to Edit, on the scenario page, and on each card in the scenario list) makes a full copy — packages, phases, events, property-ends, and savings rules — under a new name, and takes you straight to it. It's the fastest way to try a different multiplier, bonus inclusion, or garden-leave length: duplicate a known-good scenario, then edit the copy's package(s) rather than re-entering everything from scratch. Only this scenario's own (non-global) events/rules are copied — the copy still sees every global event/rule fresh, with no overrides carried over. Delete removes a scenario and everything in it — packages, phases, events, checklist, savings rules, and any per-scenario overrides — permanently.",
+        text: "Duplicate (next to Edit, on the scenario page, and on each card in the scenario list) makes a full copy — packages, phases, events, property changes, and savings rules — under a new name, and takes you straight to it. It's the fastest way to try a different multiplier, bonus inclusion, or garden-leave length: duplicate a known-good scenario, then edit the copy's package(s) rather than re-entering everything from scratch. Only this scenario's own (non-global) events/property changes/rules are copied — the copy still sees every global item fresh, with no overrides carried over. Delete removes a scenario and everything in it — packages, phases, events, checklist, savings rules, and any per-scenario overrides — permanently.",
       },
     ],
   },
@@ -272,11 +272,11 @@ export const HELP_ARTICLES: HelpArticle[] = [
     slug: "global-events-and-rules",
     title: "Global events & rules",
     category: "Severance & redundancy scenarios",
-    summary: "Mark a one-off event or savings rule as \"All scenarios\" so it applies everywhere without copy-pasting it into each one.",
+    summary: "Mark a one-off event, property change, or savings rule as \"All scenarios\" so it applies everywhere without copy-pasting it into each one.",
     blocks: [
       {
         type: "p",
-        text: "Every one-off event and savings rule is either scoped to the one scenario it was created in, or global — applying to every scenario at once. Pick which when you add it: the add form has an \"Applies to\" toggle for \"This scenario only\" vs. \"All scenarios.\" Choosing \"All scenarios\" creates it directly in the Global list, not inside whichever scenario you happened to be viewing.",
+        text: "Every one-off event, property change, and savings rule is either scoped to the one scenario it was created in, or global — applying to every scenario at once. Pick which when you add it: the add form has an \"Applies to\" toggle for \"This scenario only\" vs. \"All scenarios.\" Choosing \"All scenarios\" creates it directly in the Global list, not inside whichever scenario you happened to be viewing. A property can only have one global end date — if it already has one, edit that instead of adding a second.",
       },
       {
         type: "p",
@@ -284,7 +284,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "If just the amount needs to differ for one scenario, use Override right from that scenario's merged list — it supersedes the global default there only, without splitting the item into a separate copy; the row picks up an \"Overridden here\" badge, and a reset icon clears it back to the shared default. If more than the amount needs to diverge, use \"duplicate into this scenario\" instead — it makes a fully independent scenario-only copy seeded from the current values, and the global item stops counting in that one scenario so nothing is double-counted.",
+        text: "If just the amount (or, for a property change, the end date) needs to differ for one scenario, use Override right from that scenario's merged list — it supersedes the global default there only, without splitting the item into a separate copy; the row picks up an \"Overridden here\" badge, and a reset icon clears it back to the shared default. If more than that needs to diverge, use \"duplicate into this scenario\" instead — it makes a fully independent scenario-only copy seeded from the current values, and the global item stops counting in that one scenario so nothing is double-counted.",
       },
       {
         type: "note",
@@ -356,7 +356,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "Ending a property within a scenario stops every commitment linked to that property from a given date, without affecting the property or its commitments outside this scenario.",
+        text: "Ending a property stops every commitment linked to that property from a given date, without affecting the property or its commitments elsewhere. It can also be marked global instead of scoped to this one scenario — see Global events & rules — so the same end date applies everywhere without re-entering it per scenario.",
       },
       {
         type: "p",
@@ -500,10 +500,10 @@ export const HELP_ARTICLES: HelpArticle[] = [
           "Properties — createProperty, updateProperty, deleteProperty, plus ownership splits.",
           "Living Profiles — createLivingProfile, cloneLivingProfile (also duplicates the source profile's commitments/income), updateLivingProfile, deleteLivingProfile, updateCurrentLiquidSavings (the baseline's \"do-nothing\" reference figure).",
           "Severance scenarios — createScenario, updateScenario, deleteScenario (cascades to every child table); duplicateScenario deep-clones a scenario's packages/phases/events/property-ends/savings rules into a new one and takes you straight to it.",
-          "Scenario packages, phases, events & property-ends — addScenarioPackage/updateScenarioPackage/deleteScenarioPackage; addScenarioPhase/deleteScenarioPhase; addScenarioEvent/deleteScenarioEvent (creates directly in the Global list instead when scoped \"All scenarios\"), setEventOverride/clearEventOverride/duplicateGlobalEventIntoScenario/dismissStaleEventOverride; addScenarioPropertyEnd/deleteScenarioPropertyEnd.",
+          "Scenario packages, phases, events & property-ends — addScenarioPackage/updateScenarioPackage/deleteScenarioPackage; addScenarioPhase/deleteScenarioPhase; addScenarioEvent/deleteScenarioEvent (creates directly in the Global list instead when scoped \"All scenarios\"), setEventOverride/clearEventOverride/duplicateGlobalEventIntoScenario/dismissStaleEventOverride; addScenarioPropertyEnd/deleteScenarioPropertyEnd (same \"All scenarios\" global-insert exception as addScenarioEvent), setPropertyEndOverride/clearPropertyEndOverride/duplicateGlobalPropertyEndIntoScenario/dismissStalePropertyEndOverride.",
           "Scenario checklist — addChecklistItem, toggleChecklistItem, deleteChecklistItem.",
           "Savings & investment rules — addSavingsRule (re-validates the target package's own headroom server-side, not just in the form), deleteSavingsRule, setSavingsRuleOverride/clearSavingsRuleOverride/duplicateGlobalSavingsRuleIntoScenario/dismissStaleSavingsRuleOverride.",
-          "Global events & rules — addGlobalEvent/updateGlobalEvent/deleteGlobalEvent, addGlobalSavingsRule/updateGlobalSavingsRule/deleteGlobalSavingsRule: the shared objects behind Global Rules, edited independently of any scenario. Deleting one flags (doesn't delete) any scenario override tied to it.",
+          "Global events & rules — addGlobalEvent/updateGlobalEvent/deleteGlobalEvent, addGlobalSavingsRule/updateGlobalSavingsRule/deleteGlobalSavingsRule, addGlobalPropertyEnd/updateGlobalPropertyEnd/deleteGlobalPropertyEnd: the shared objects behind Global Rules, edited independently of any scenario. Deleting one flags (doesn't delete) any scenario override tied to it.",
           "Scenario variants — generateScenarioVariants: bulk-creates several derived scenarios (different job-search timing assumptions) in one step.",
         ],
       },

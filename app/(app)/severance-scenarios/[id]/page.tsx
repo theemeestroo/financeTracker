@@ -38,7 +38,12 @@ import {
   resolveSavingsPrincipal,
 } from "@/lib/runway";
 import { getBaselineRunwayInputs } from "@/lib/finance/baseline-profile";
-import { pensionWartezeitTimeline, mergeScenarioEvents, mergeScenarioSavingsRules } from "@/lib/severance";
+import {
+  pensionWartezeitTimeline,
+  mergeScenarioEvents,
+  mergeScenarioPropertyEnds,
+  mergeScenarioSavingsRules,
+} from "@/lib/severance";
 import {
   addScenarioEvent,
   deleteScenarioEvent,
@@ -48,7 +53,13 @@ import {
 } from "../event-actions";
 import { addScenarioPhase, deleteScenarioPhase } from "../phase-actions";
 import { addScenarioPackage, deleteScenarioPackage } from "../package-actions";
-import { addScenarioPropertyEnd, deleteScenarioPropertyEnd } from "../property-end-actions";
+import {
+  addScenarioPropertyEnd,
+  deleteScenarioPropertyEnd,
+  setPropertyEndOverride,
+  clearPropertyEndOverride,
+  duplicateGlobalPropertyEndIntoScenario,
+} from "../property-end-actions";
 import { generateScenarioVariants } from "../variant-actions";
 import { addChecklistItem, deleteChecklistItem, toggleChecklistItem } from "../checklist-actions";
 import {
@@ -95,6 +106,7 @@ import type {
   Property,
   ScenarioChecklistItem,
   SeveranceGlobalEventOverride,
+  SeveranceGlobalPropertyEndOverride,
   SeveranceGlobalSavingsRuleOverride,
   SeveranceScenario,
   SeveranceScenarioEvent,
@@ -162,6 +174,8 @@ export default async function ScenarioDetailPage({
     { data: eventOverrideRows },
     { data: properties },
     { data: propertyEndRows },
+    { data: globalPropertyEndRows },
+    { data: propertyEndOverrideRows },
     { data: packageRows },
     { data: checklistRows },
     { data: savingsRuleRows },
@@ -180,11 +194,9 @@ export default async function ScenarioDetailPage({
     supabase.from("severance_scenario_events").select("*").eq("scope", "global").order("date"),
     supabase.from("severance_global_event_overrides").select("*").eq("scenario_id", id),
     supabase.from("properties").select("id, profile_id, name, address, notes, end_date").order("name"),
-    supabase
-      .from("severance_scenario_property_ends")
-      .select("id, scenario_id, property_id, end_date")
-      .eq("scenario_id", id)
-      .order("end_date"),
+    supabase.from("severance_scenario_property_ends").select("*").eq("scenario_id", id).order("end_date"),
+    supabase.from("severance_scenario_property_ends").select("*").eq("scope", "global").order("end_date"),
+    supabase.from("severance_global_property_end_overrides").select("*").eq("scenario_id", id),
     supabase
       .from("severance_scenario_packages")
       .select("*")
@@ -273,6 +285,15 @@ export default async function ScenarioDetailPage({
     (eventRows ?? []) as SeveranceScenarioEvent[],
     (globalEventRows ?? []) as SeveranceScenarioEvent[],
     (eventOverrideRows ?? []) as SeveranceGlobalEventOverride[]
+  );
+
+  // Property changes — same merge, keyed by property_id instead of an id
+  // of its own. Shared with resolve-scenario.ts's own merge so the Timeline
+  // tab can never disagree with what actually fed the projection.
+  const mergedPropertyEnds = mergeScenarioPropertyEnds(
+    (propertyEndRows ?? []) as SeveranceScenarioPropertyEnd[],
+    (globalPropertyEndRows ?? []) as SeveranceScenarioPropertyEnd[],
+    (propertyEndOverrideRows ?? []) as SeveranceGlobalPropertyEndOverride[]
   );
 
   // Savings/investment rules — this scenario's own rows merged with every
@@ -1316,29 +1337,81 @@ export default async function ScenarioDetailPage({
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
-                  {((propertyEndRows ?? []) as SeveranceScenarioPropertyEnd[]).length > 0 && (
+                  {mergedPropertyEnds.length > 0 && (
                     <Table aria-label="Scenario property changes">
                       <TableHeader>
                         <TableRow>
                           <TableHead scope="col">Property</TableHead>
                           <TableHead scope="col">Ends from</TableHead>
-                          <TableHead scope="col" className="w-12 text-right">
+                          <TableHead scope="col" className="w-56 text-right">
                             &nbsp;
                           </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {((propertyEndRows ?? []) as SeveranceScenarioPropertyEnd[]).map((pe) => (
+                        {mergedPropertyEnds.map((pe) => (
                           <TableRow key={pe.id}>
                             <TableCell className="font-medium">
-                              {propertyById.get(pe.property_id) ?? "—"}
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {pe.scope === "global" ? (
+                                  <Link
+                                    href={`/global-rules/property-ends/${pe.id}/edit`}
+                                    className="underline underline-offset-2"
+                                  >
+                                    {propertyById.get(pe.property_id) ?? "—"}
+                                  </Link>
+                                ) : (
+                                  propertyById.get(pe.property_id) ?? "—"
+                                )}
+                                <Badge variant="outline" className="text-xs font-normal">
+                                  {pe.scope === "global" ? "Global" : "Scenario"}
+                                </Badge>
+                                {pe.isOverridden && (
+                                  <Badge variant="outline" className="text-xs font-normal">
+                                    Overridden here
+                                  </Badge>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell className="tabular-nums">{formatDateDisplay(pe.end_date)}</TableCell>
                             <TableCell className="text-right">
-                              <DeleteButton
-                                action={deleteScenarioPropertyEnd.bind(null, pe.id, id)}
-                                confirmMessage="Remove this property change?"
-                              />
+                              {pe.scope === "global" ? (
+                                <div className="flex justify-end gap-1.5">
+                                  {pe.isOverridden && (
+                                    <form action={clearPropertyEndOverride.bind(null, pe.id, id)}>
+                                      <Button
+                                        type="submit"
+                                        variant="ghost"
+                                        size="icon"
+                                        aria-label="Clear override"
+                                      >
+                                        <RotateCcw className="size-4" />
+                                      </Button>
+                                    </form>
+                                  )}
+                                  <OverridePopover
+                                    action={setPropertyEndOverride.bind(null, pe.id, id)}
+                                    currentValue={pe.end_date}
+                                    field="end_date"
+                                    type="date"
+                                  />
+                                  <form action={duplicateGlobalPropertyEndIntoScenario.bind(null, pe.id, id)}>
+                                    <Button
+                                      type="submit"
+                                      variant="ghost"
+                                      size="icon"
+                                      aria-label="Duplicate into this scenario"
+                                    >
+                                      <CopyPlus className="size-4" />
+                                    </Button>
+                                  </form>
+                                </div>
+                              ) : (
+                                <DeleteButton
+                                  action={deleteScenarioPropertyEnd.bind(null, pe.id, id)}
+                                  confirmMessage="Remove this property change?"
+                                />
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1358,6 +1431,7 @@ export default async function ScenarioDetailPage({
                       <PropertyEndForm
                         action={addScenarioPropertyEnd.bind(null, id)}
                         properties={propertyRows}
+                        showScopeToggle
                       />
                     </AddDisclosure>
                   )}

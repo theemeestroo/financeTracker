@@ -261,18 +261,19 @@ Index: `severance_scenario_phases_scenario_id_idx`. Standard 4 owner-only RLS po
 
 ### `severance_scenario_property_ends`
 
-Lets a scenario end a specific property (and every commitment linked to it) from a given date, without a full profile phase swap.
+Ends a specific property (and every commitment linked to it) from a given date, without a full profile phase swap. Either scoped to one scenario (`scope = 'scenario'`) or global (`scope = 'global'`, applies to every scenario — see "Global vs. scenario-scoped items" below).
 
 | Column | Type | Nullable | Default | Notes |
 |---|---|---|---|---|
 | `id` | uuid | not null | `gen_random_uuid()` | PK |
 | `user_id` | uuid | not null | `auth.uid()` | FK cascade |
-| `scenario_id` | uuid | not null | — | FK → `severance_scenarios(id)` cascade |
+| `scope` | text | not null | `'scenario'` | CHECK in `global` / `scenario` |
+| `scenario_id` | uuid | nullable | — | FK → `severance_scenarios(id)` cascade; **null iff `scope = 'global'`** (CHECK) |
 | `property_id` | uuid | not null | — | FK → `properties(id)` cascade |
 | `end_date` | date | not null | — | |
 | `created_at` | timestamptz | not null | `now()` | |
 
-Unique on `(scenario_id, property_id)`. Index on `scenario_id`. Standard 4 owner-only RLS policies.
+Unique on `(scenario_id, property_id)` — only meaningful for `scope = 'scenario'` rows, since `scenario_id` is always null across every global row (NULL≠NULL doesn't dedupe them at the DB level); the add actions instead reject a second global row for the same `property_id` app-side, since a property's identity there *is* its `property_id` — unlike an event or savings rule, there's no separate name to disambiguate two rows about the same property. Index on `scenario_id`. Standard 4 owner-only RLS policies.
 
 ## Checklist table
 
@@ -320,9 +321,9 @@ Indexes: `severance_scenario_savings_rules_scenario_id_idx`, `severance_scenario
 
 ## Global vs. scenario-scoped items
 
-`severance_scenario_events` and `severance_scenario_savings_rules` rows are either scoped to one scenario or global (apply to every scenario, edited from a single shared object at `/global-rules` rather than from inside any one scenario). A scenario's projection (`resolve-scenario.ts`) and its Timeline/Savings & Investment tabs both merge scenario-scoped rows with every applicable global row via the same shared functions (`lib/severance/global-items.ts`'s `mergeScenarioEvents`/`mergeScenarioSavingsRules`), so the two can never disagree about which items apply or at what value.
+`severance_scenario_events`, `severance_scenario_savings_rules`, and `severance_scenario_property_ends` rows are either scoped to one scenario or global (apply to every scenario, edited from a single shared object at `/global-rules` rather than from inside any one scenario). A scenario's projection (`resolve-scenario.ts`) and its Timeline/Savings & Investment tabs both merge scenario-scoped rows with every applicable global row via the same shared functions (`lib/severance/global-items.ts`'s `mergeScenarioEvents`/`mergeScenarioSavingsRules`/`mergeScenarioPropertyEnds`), so the two can never disagree about which items apply or at what value. When a scenario happens to have both a scenario-scoped and an unsuppressed global row for the *same* property, `resolve-scenario.ts` and the scenario detail page both prefer the scenario-scoped one as the more specific choice.
 
-A per-scenario override lets one scenario supersede a global item's own amount/value without forking it — the two tables below hold one row per (global item, scenario) that has an override.
+A per-scenario override lets one scenario supersede a global item's own amount/value (or, for a property change, its `end_date`) without forking it — the three tables below hold one row per (global item, scenario) that has an override.
 
 ### `severance_global_event_overrides`
 
@@ -344,7 +345,11 @@ Unique index (non-partial — NULL≠NULL under standard SQL uniqueness, so any 
 
 Same shape as `severance_global_event_overrides`, keyed by `global_rule_id uuid references severance_scenario_savings_rules(id) on delete set null` instead — `value` supersedes `amount` or `percentage`, whichever the rule's `allocation_type` uses.
 
-**Deletion behavior:** deleting a global event/rule does **not** delete its override rows — `ON DELETE SET NULL` (not cascade) means the delete action snapshots `orphaned_item_name`/`stale_since` onto them first, then the FK nulls `global_event_id`/`global_rule_id` automatically, surfacing them under "Needs review" on `/global-rules` instead of silently vanishing. Deleting a *scenario* still cascades its own override rows (via `scenario_id`) — that data genuinely stops mattering once the scenario is gone.
+### `severance_global_property_end_overrides`
+
+Same shape as `severance_global_event_overrides`, keyed by `global_property_end_id uuid references severance_scenario_property_ends(id) on delete set null` instead — `end_date` (a `date`, not a numeric `value`) supersedes the global property-end's own `end_date`. CHECK: `end_date` set unless `suppressed`.
+
+**Deletion behavior:** deleting a global event/rule/property-end does **not** delete its override rows — `ON DELETE SET NULL` (not cascade) means the delete action snapshots `orphaned_item_name`/`stale_since` onto them first, then the FK nulls `global_event_id`/`global_rule_id`/`global_property_end_id` automatically, surfacing them under "Needs review" on `/global-rules` instead of silently vanishing. Deleting a *scenario* still cascades its own override rows (via `scenario_id`) — that data genuinely stops mattering once the scenario is gone.
 
 ## Reference / seed data tables
 
@@ -458,13 +463,15 @@ severance_scenarios
   │     └─< severance_scenario_savings_rules (scope="scenario")
   ├─< severance_scenario_events (scope="scenario") ──> tax_profiles (nullable, SET NULL)
   ├─< severance_scenario_phases ──> living_profiles (RESTRICT)
-  ├─< severance_scenario_property_ends ──> properties
+  ├─< severance_scenario_property_ends (scope="scenario") ──> properties
   ├─< scenario_checklist_items
   ├─< severance_global_event_overrides ──> severance_scenario_events (nullable, SET NULL)
-  └─< severance_global_savings_rule_overrides ──> severance_scenario_savings_rules (nullable, SET NULL)
+  ├─< severance_global_savings_rule_overrides ──> severance_scenario_savings_rules (nullable, SET NULL)
+  └─< severance_global_property_end_overrides ──> severance_scenario_property_ends (nullable, SET NULL)
 
 severance_scenario_events (scope="global", scenario_id null — no scenario/member FK)
 severance_scenario_savings_rules (scope="global", scenario_id/package_id null) ──> household_members
+severance_scenario_property_ends (scope="global", scenario_id null) ──> properties
 
 tax_year_parameters (global reference, keyed by year)
 unemployment_benefit_parameters (global reference, keyed by year)
@@ -473,5 +480,5 @@ unemployment_benefit_parameters (global reference, keyed by year)
 **ON DELETE behavior worth remembering:**
 
 - Almost everything cascades from `auth.users` and from its immediate parent (household member / scenario / commitment / property / income), so deleting a user or a top-level entity cleans up its whole subtree.
-- Exceptions: `commitments.property_id`, `income.tax_profile_id`, `severance_scenario_events.recurring_tax_profile_id`, and the two override tables' `global_event_id`/`global_rule_id` are `ON DELETE SET NULL` (soft unlink rather than cascade delete — the override tables' delete actions snapshot onto the row first, turning the null-out into a "flagged for review" state rather than a silent unlink).
+- Exceptions: `commitments.property_id`, `income.tax_profile_id`, `severance_scenario_events.recurring_tax_profile_id`, and the three override tables' `global_event_id`/`global_rule_id`/`global_property_end_id` are `ON DELETE SET NULL` (soft unlink rather than cascade delete — the override tables' delete actions snapshot onto the row first, turning the null-out into a "flagged for review" state rather than a silent unlink).
 - `severance_scenario_phases.profile_id` is `ON DELETE RESTRICT` — the only restrictive FK in the schema.

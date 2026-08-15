@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   AlertTriangle,
   CalendarClock,
+  Home,
   Pencil,
   PiggyBank,
   Plus,
@@ -10,10 +11,13 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { addGlobalEvent, deleteGlobalEvent } from "./event-actions";
 import { addGlobalSavingsRule, deleteGlobalSavingsRule } from "./savings-rule-actions";
+import { addGlobalPropertyEnd, deleteGlobalPropertyEnd } from "./property-end-actions";
 import { dismissStaleEventOverride } from "../severance-scenarios/event-actions";
 import { dismissStaleSavingsRuleOverride } from "../severance-scenarios/savings-rule-actions";
+import { dismissStalePropertyEndOverride } from "../severance-scenarios/property-end-actions";
 import { EventForm } from "../severance-scenarios/event-form";
 import { SavingsRuleForm } from "../severance-scenarios/savings-rule-form";
+import { PropertyEndForm } from "../severance-scenarios/property-end-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -26,10 +30,13 @@ import {
   ACCRUAL_FREQUENCIES,
   SCENARIO_EVENT_TYPES,
   type HouseholdMember,
+  type Property,
   type SeveranceGlobalEventOverride,
+  type SeveranceGlobalPropertyEndOverride,
   type SeveranceGlobalSavingsRuleOverride,
   type SeveranceScenario,
   type SeveranceScenarioEvent,
+  type SeveranceScenarioPropertyEnd,
   type SeveranceScenarioSavingsRule,
 } from "@/lib/types";
 
@@ -39,10 +46,13 @@ export default async function GlobalRulesPage() {
   const [
     { data: eventRows },
     { data: savingsRuleRows },
+    { data: propertyEndRows },
     { data: memberRows },
     { data: scenarioRows },
+    { data: properties },
     { data: staleEventOverrideRows },
     { data: staleSavingsRuleOverrideRows },
+    { data: stalePropertyEndOverrideRows },
   ] = await Promise.all([
     supabase.from("severance_scenario_events").select("*").eq("scope", "global").order("date"),
     supabase
@@ -50,28 +60,40 @@ export default async function GlobalRulesPage() {
       .select("*")
       .eq("scope", "global")
       .order("created_at"),
+    supabase
+      .from("severance_scenario_property_ends")
+      .select("*")
+      .eq("scope", "global")
+      .order("end_date"),
     supabase.from("household_members").select("id, name, created_at").order("name"),
     supabase.from("severance_scenarios").select("id, name"),
+    supabase.from("properties").select("id, profile_id, name, address, notes, end_date").order("name"),
     supabase.from("severance_global_event_overrides").select("*").not("stale_since", "is", null),
     supabase.from("severance_global_savings_rule_overrides").select("*").not("stale_since", "is", null),
+    supabase.from("severance_global_property_end_overrides").select("*").not("stale_since", "is", null),
   ]);
 
   const events = (eventRows ?? []) as SeveranceScenarioEvent[];
   const savingsRules = (savingsRuleRows ?? []) as SeveranceScenarioSavingsRule[];
+  const propertyEnds = (propertyEndRows ?? []) as SeveranceScenarioPropertyEnd[];
   const members = (memberRows ?? []) as HouseholdMember[];
   const memberById = new Map(members.map((m) => [m.id, m.name]));
   const scenarioById = new Map(((scenarioRows ?? []) as Pick<SeveranceScenario, "id" | "name">[]).map((s) => [s.id, s.name]));
+  const propertyRows = (properties ?? []) as Property[];
+  const propertyById = new Map(propertyRows.map((p) => [p.id, p.name]));
   const staleEventOverrides = (staleEventOverrideRows ?? []) as SeveranceGlobalEventOverride[];
   const staleSavingsRuleOverrides = (staleSavingsRuleOverrideRows ?? []) as SeveranceGlobalSavingsRuleOverride[];
-  const hasStaleOverrides = staleEventOverrides.length > 0 || staleSavingsRuleOverrides.length > 0;
+  const stalePropertyEndOverrides = (stalePropertyEndOverrideRows ?? []) as SeveranceGlobalPropertyEndOverride[];
+  const hasStaleOverrides =
+    staleEventOverrides.length > 0 || staleSavingsRuleOverrides.length > 0 || stalePropertyEndOverrides.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-3xl font-extrabold tracking-tight">Global Events & Rules</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Events and savings rules marked &quot;All scenarios&quot; live here, independent of any one
-          scenario — edit once, and it propagates everywhere it applies.
+          Events, property changes, and savings rules marked &quot;All scenarios&quot; live here,
+          independent of any one scenario — edit once, and it propagates everywhere it applies.
         </p>
       </div>
 
@@ -120,6 +142,25 @@ export default async function GlobalRulesPage() {
                   </span>
                 </span>
                 <form action={dismissStaleSavingsRuleOverride.bind(null, o.id)}>
+                  <Button type="submit" variant="outline" size="sm">
+                    Dismiss
+                  </Button>
+                </form>
+              </div>
+            ))}
+            {stalePropertyEndOverrides.map((o) => (
+              <div
+                key={o.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm"
+              >
+                <span>
+                  <span className="font-medium">{o.orphaned_item_name ?? "Deleted property change"}</span>{" "}
+                  <span className="text-muted-foreground">
+                    — overridden in {scenarioById.get(o.scenario_id) ?? "a deleted scenario"}
+                    {o.end_date != null ? ` at ${formatDateDisplay(o.end_date)}` : ""}
+                  </span>
+                </span>
+                <form action={dismissStalePropertyEndOverride.bind(null, o.id)}>
                   <Button type="submit" variant="outline" size="sm">
                     Dismiss
                   </Button>
@@ -191,6 +232,67 @@ export default async function GlobalRulesPage() {
           <AddDisclosure label="Add global event" icon={Plus}>
             <EventForm action={addGlobalEvent} />
           </AddDisclosure>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            <TitleIcon icon={Home} accent="var(--series-2)" />
+            Global property changes
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {propertyEnds.length > 0 && (
+            <Table aria-label="Global property changes">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Property</TableHead>
+                  <TableHead scope="col">Ends from</TableHead>
+                  <TableHead scope="col" className="w-20 text-right">
+                    &nbsp;
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {propertyEnds.map((pe) => (
+                  <TableRow key={pe.id}>
+                    <TableCell className="font-medium">{propertyById.get(pe.property_id) ?? "—"}</TableCell>
+                    <TableCell className="tabular-nums">{formatDateDisplay(pe.end_date)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Edit"
+                          render={<Link href={`/global-rules/property-ends/${pe.id}/edit`} />}
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                        <DeleteButton
+                          action={deleteGlobalPropertyEnd.bind(null, pe.id)}
+                          confirmMessage={`Delete this global end date for "${propertyById.get(pe.property_id) ?? "this property"}"? Any scenario overrides tied to it are kept for review, not deleted.`}
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+          {propertyRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No properties yet —{" "}
+              <Link href="/properties" className="underline underline-offset-2">
+                add one
+              </Link>{" "}
+              to end it globally.
+            </p>
+          ) : (
+            <AddDisclosure label="Add global property change" icon={Plus}>
+              <PropertyEndForm action={addGlobalPropertyEnd} properties={propertyRows} />
+            </AddDisclosure>
+          )}
         </CardContent>
       </Card>
 

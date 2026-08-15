@@ -10,15 +10,24 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 type FormState = { error?: string } | undefined;
 
 /** Small inline popover for setting a global item's per-scenario override
- *  value — doesn't fork the item, just supersedes its amount/value for this
- *  one scenario. Shared by the events and savings-rules merged tables on
- *  the scenario detail page. */
+ *  value — doesn't fork the item, just supersedes its amount/value (or, for
+ *  property changes, its end date) for this one scenario. Shared by the
+ *  events, savings-rules, and property-changes merged tables on the
+ *  scenario detail page. `field`/`type` pick the form's single input —
+ *  `"value"`/number for events & savings rules, `"end_date"`/date for
+ *  property changes — matching whichever field name each item's own
+ *  override action (`setEventOverride`/`setSavingsRuleOverride`/
+ *  `setPropertyEndOverride`) expects. */
 export function OverridePopover({
   action,
   currentValue,
+  field = "value",
+  type = "number",
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
-  currentValue?: number | null;
+  currentValue?: number | string | null;
+  field?: string;
+  type?: "number" | "date";
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
   return (
@@ -30,13 +39,14 @@ export function OverridePopover({
       <PopoverContent className="w-56">
         <form action={formAction} className="flex flex-col gap-2">
           <Label htmlFor="override_value" className="text-xs font-medium text-muted-foreground">
-            Value for this scenario
+            {type === "date" ? "Date for this scenario" : "Value for this scenario"}
           </Label>
           <Input
+            key={String(currentValue)}
             id="override_value"
-            name="value"
-            type="number"
-            step="0.01"
+            name={field}
+            type={type}
+            step={type === "number" ? "0.01" : undefined}
             defaultValue={currentValue ?? undefined}
             required
           />

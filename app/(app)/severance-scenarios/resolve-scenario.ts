@@ -9,7 +9,12 @@ import {
 } from "@/lib/tax";
 import { calculateSeveranceNet } from "@/lib/tax/fuenftelregelung";
 import type { AnnualPersonTaxSummary, AnnualSeveranceTax } from "@/lib/tax";
-import { calculateSeverancePackage, mergeScenarioEvents, mergeScenarioSavingsRules } from "@/lib/severance";
+import {
+  calculateSeverancePackage,
+  mergeScenarioEvents,
+  mergeScenarioPropertyEnds,
+  mergeScenarioSavingsRules,
+} from "@/lib/severance";
 import {
   alg1DurationMonths,
   alg1MonthlyNet,
@@ -42,10 +47,12 @@ import type {
   Income,
   IncomeSplit,
   SeveranceGlobalEventOverride,
+  SeveranceGlobalPropertyEndOverride,
   SeveranceGlobalSavingsRuleOverride,
   SeveranceScenario,
   SeveranceScenarioEvent,
   SeveranceScenarioPackage,
+  SeveranceScenarioPropertyEnd,
   SeveranceScenarioSavingsRule,
   TaxProfileRow,
 } from "@/lib/types";
@@ -379,25 +386,40 @@ export async function resolveScenario(
   // profile, for the Fünftelregelung base) — the per-profile filtering
   // below (incomeByProfile) is enough to scope them to this scenario.
   const profileIds = Array.from(new Set(phases.map((p) => p.profile_id)));
-  const [{ data: allCommitments }, { data: propertyEndRows }] = await Promise.all([
-    supabase
-      .from("commitments")
-      .select(
-        "id, profile_id, name, category, amount, frequency, essential, start_date, end_date, property_id"
-      )
-      .in("profile_id", profileIds),
-    supabase
-      .from("severance_scenario_property_ends")
-      .select("property_id, end_date")
-      .eq("scenario_id", scenario.id),
-  ]);
+  const [{ data: allCommitments }, { data: propertyEndRows }, { data: globalPropertyEndRows }, { data: propertyEndOverrideRows }] =
+    await Promise.all([
+      supabase
+        .from("commitments")
+        .select(
+          "id, profile_id, name, category, amount, frequency, essential, start_date, end_date, property_id"
+        )
+        .in("profile_id", profileIds),
+      // scope="global" rows have scenario_id=null, so this already excludes
+      // them — global property-ends are fetched separately below and merged in.
+      supabase.from("severance_scenario_property_ends").select("*").eq("scenario_id", scenario.id),
+      supabase.from("severance_scenario_property_ends").select("*").eq("scope", "global"),
+      supabase.from("severance_global_property_end_overrides").select("*").eq("scenario_id", scenario.id),
+    ]);
 
-  // A scenario-scoped "end this property" override: cap the effective
-  // end_date of every commitment linked to that property, without touching
-  // the property or its commitments outside this scenario.
-  const propertyEndByPropertyId = new Map(
-    (propertyEndRows ?? []).map((r) => [r.property_id as string, r.end_date as string])
+  // This scenario's own "end this property" rows plus every applicable
+  // global one (override-aware) — caps the effective end_date of every
+  // commitment linked to that property, without touching the property or
+  // its commitments outside where this applies. When both a scenario-scoped
+  // and a global row target the same property (not the normal case outside
+  // a stale duplicate — see `mergeScenarioPropertyEnds`'s own comment), the
+  // scenario-scoped one wins as the more specific choice.
+  const mergedPropertyEnds = mergeScenarioPropertyEnds(
+    (propertyEndRows ?? []) as SeveranceScenarioPropertyEnd[],
+    (globalPropertyEndRows ?? []) as SeveranceScenarioPropertyEnd[],
+    (propertyEndOverrideRows ?? []) as SeveranceGlobalPropertyEndOverride[]
   );
+  // mergeScenarioPropertyEnds always returns scenario-scoped rows before
+  // global ones, so the first entry seen per property here is the
+  // scenario-scoped one whenever both exist.
+  const propertyEndByPropertyId = new Map<string, string>();
+  for (const pe of mergedPropertyEnds) {
+    if (!propertyEndByPropertyId.has(pe.property_id)) propertyEndByPropertyId.set(pe.property_id, pe.end_date);
+  }
   const commitmentsWithPropertyEnds = ((allCommitments ?? []) as Commitment[]).map((c) => {
     const override = c.property_id ? propertyEndByPropertyId.get(c.property_id) : undefined;
     if (!override) return c;

@@ -387,14 +387,34 @@ export type SeveranceScenarioPhase = {
   label: string | null;
 };
 
-/** Scenario-scoped override: ends a property (and everything linked to it)
- *  from a date, without touching the property or its commitments outside
- *  this scenario. */
+/** Ends a property (and everything linked to it) from a date, without
+ *  touching the property or its commitments outside where this applies.
+ *  `scenario_id` is null exactly when `scope === "global"` — a global row
+ *  ends the property the same way in every scenario (see
+ *  `lib/severance/global-items.ts`'s `mergeScenarioPropertyEnds`), same
+ *  scope model as `SeveranceScenarioEvent`. */
 export type SeveranceScenarioPropertyEnd = {
   id: string;
-  scenario_id: string;
+  scope: ScenarioItemScope;
+  scenario_id: string | null;
   property_id: string;
   end_date: string;
+};
+
+/** A per-scenario supersede of a global property-end's own `end_date`.
+ *  `suppressed` (end_date left null) means this scenario has its own
+ *  independent scope="scenario" copy instead ("duplicate into this
+ *  scenario") — the global item stops contributing here so the two don't
+ *  double-count. `global_property_end_id`/`orphaned_item_name`/`stale_since`:
+ *  see `SeveranceGlobalSavingsRuleOverride`'s own comment — identical shape. */
+export type SeveranceGlobalPropertyEndOverride = {
+  id: string;
+  global_property_end_id: string | null;
+  scenario_id: string;
+  end_date: string | null;
+  suppressed: boolean;
+  orphaned_item_name: string | null;
+  stale_since: string | null;
 };
 
 /** Redundancy admin checklist item — template_key null for a custom
