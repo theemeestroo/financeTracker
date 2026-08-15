@@ -223,13 +223,14 @@ Unique on `(scenario_id, household_member_id)`. Indexes on `scenario_id`, `house
 
 ### `severance_scenario_events`
 
-Discrete one-off or recurring-income cash-flow events within a scenario's timeline (e.g. a lump-sum outflow, a new job's recurring income starting).
+Discrete one-off or recurring-income cash-flow events (e.g. a lump-sum outflow, a new job's recurring income starting). Either scoped to one scenario's timeline (`scope = 'scenario'`) or global (`scope = 'global'`, applies to every scenario — see "Global vs. scenario-scoped items" below).
 
 | Column | Type | Nullable | Default | Notes |
 |---|---|---|---|---|
 | `id` | uuid | not null | `gen_random_uuid()` | PK |
 | `user_id` | uuid | not null | `auth.uid()` | FK cascade |
-| `scenario_id` | uuid | not null | — | FK → `severance_scenarios(id)` cascade |
+| `scope` | text | not null | `'scenario'` | CHECK in `global` / `scenario` |
+| `scenario_id` | uuid | nullable | — | FK → `severance_scenarios(id)` cascade; **null iff `scope = 'global'`** (CHECK) |
 | `name` | text | not null | — | |
 | `event_type` | text | not null | — | CHECK in `one_off_outflow` / `one_off_inflow` / `recurring_income_start` |
 | `amount` | numeric(10,2) | nullable | — | one-off event types |
@@ -295,14 +296,18 @@ Index: `scenario_checklist_items_scenario_id_idx`. Standard 4 owner-only RLS pol
 
 ### `severance_scenario_savings_rules`
 
-Sets aside part of one severance package's net lump sum (a fixed amount, or a % of it — resolved to a share of the household's *running balance*, not a fixed side-account) and applies a return every `accrual_frequency` to that period's actual opening balance, added as income in that package's runway projection (`lib/runway/savings.ts`) — it rises when income/a lump sum lands and falls as the household spends its runway down. Per-package, not per-scenario — a two-package scenario validates allocation headroom independently per person, same reasoning as the ALG I claim inputs living on `severance_scenario_packages`.
+Sets aside part of one severance package's net lump sum (a fixed amount, or a % of it — resolved to a share of the household's *running balance*, not a fixed side-account) and applies a return every `accrual_frequency` to that period's actual opening balance, added as income in that package's runway projection (`lib/runway/savings.ts`) — it rises when income/a lump sum lands and falls as the household spends its runway down.
+
+Scenario-scoped rows (`scope = 'scenario'`) are per-package, not per-scenario — a two-package scenario validates allocation headroom independently per person, same reasoning as the ALG I claim inputs living on `severance_scenario_packages`. Global rows (`scope = 'global'`) key off `household_member_id` instead: a package is inherently scenario-specific (one person's severance *within one scenario*), so a global rule can't reference one directly — it resolves per-scenario against *that scenario's own* package for the same household member (`lib/severance/global-items.ts`; see "Global vs. scenario-scoped items" below).
 
 | Column | Type | Nullable | Default | Notes |
 |---|---|---|---|---|
 | `id` | uuid | not null | `gen_random_uuid()` | PK |
 | `user_id` | uuid | not null | `auth.uid()` | FK cascade |
-| `scenario_id` | uuid | not null | — | FK → `severance_scenarios(id)` cascade |
-| `package_id` | uuid | not null | — | FK → `severance_scenario_packages(id)` cascade |
+| `scope` | text | not null | `'scenario'` | CHECK in `global` / `scenario` |
+| `scenario_id` | uuid | nullable | — | FK → `severance_scenarios(id)` cascade; set iff `scope = 'scenario'` (CHECK) |
+| `package_id` | uuid | nullable | — | FK → `severance_scenario_packages(id)` cascade; set iff `scope = 'scenario'` (CHECK) |
+| `household_member_id` | uuid | nullable | — | FK → `household_members(id)` cascade; set iff `scope = 'global'` (CHECK) |
 | `name` | text | not null | — | e.g. "Index fund" |
 | `allocation_type` | text | not null | — | `'amount'` \| `'percentage'` — exactly one of `amount`/`percentage` is set, app-side (Zod), same convention as `severance_scenario_packages.gross_severance_override` (no DB check constraint) |
 | `amount` | numeric(12,2) | nullable | — | set when `allocation_type = 'amount'` |
@@ -311,7 +316,35 @@ Sets aside part of one severance package's net lump sum (a fixed amount, or a % 
 | `accrual_frequency` | text | not null | — | `'monthly'` \| `'quarterly'` \| `'annually'` |
 | `created_at` | timestamptz | not null | `now()` | |
 
-Indexes: `severance_scenario_savings_rules_scenario_id_idx`, `severance_scenario_savings_rules_package_id_idx`. Standard 4 owner-only RLS policies.
+Indexes: `severance_scenario_savings_rules_scenario_id_idx`, `severance_scenario_savings_rules_package_id_idx`, `severance_scenario_savings_rules_household_member_id_idx`. Standard 4 owner-only RLS policies.
+
+## Global vs. scenario-scoped items
+
+`severance_scenario_events` and `severance_scenario_savings_rules` rows are either scoped to one scenario or global (apply to every scenario, edited from a single shared object at `/global-rules` rather than from inside any one scenario). A scenario's projection (`resolve-scenario.ts`) and its Timeline/Savings & Investment tabs both merge scenario-scoped rows with every applicable global row via the same shared functions (`lib/severance/global-items.ts`'s `mergeScenarioEvents`/`mergeScenarioSavingsRules`), so the two can never disagree about which items apply or at what value.
+
+A per-scenario override lets one scenario supersede a global item's own amount/value without forking it — the two tables below hold one row per (global item, scenario) that has an override.
+
+### `severance_global_event_overrides`
+
+| Column | Type | Nullable | Default | Notes |
+|---|---|---|---|---|
+| `id` | uuid | not null | `gen_random_uuid()` | PK |
+| `user_id` | uuid | not null | `auth.uid()` | FK cascade |
+| `global_event_id` | uuid | nullable | — | FK → `severance_scenario_events(id)` **SET NULL** |
+| `scenario_id` | uuid | not null | — | FK → `severance_scenarios(id)` cascade |
+| `value` | numeric(10,2) | nullable | — | supersedes the global event's `amount` or `recurring_gross_amount`, whichever its `event_type` uses; CHECK: set unless `suppressed` |
+| `suppressed` | boolean | not null | `false` | set (with `value` null) when this scenario was given its own independent scope="scenario" copy via "duplicate into this scenario" — the global event stops contributing to this scenario so the two don't double-count |
+| `orphaned_item_name` | text | nullable | — | snapshotted by the delete action just before the global event is deleted, since the FK then nulls `global_event_id` |
+| `stale_since` | timestamptz | nullable | — | set alongside `orphaned_item_name` — non-null means "flagged for review" (shown on `/global-rules`) |
+| `created_at` | timestamptz | not null | `now()` | |
+
+Unique index (non-partial — NULL≠NULL under standard SQL uniqueness, so any number of stale/nulled-out rows can coexist per scenario) on `(global_event_id, scenario_id)`, also the `upsert` conflict target. Index on `scenario_id`. Standard 4 owner-only RLS policies.
+
+### `severance_global_savings_rule_overrides`
+
+Same shape as `severance_global_event_overrides`, keyed by `global_rule_id uuid references severance_scenario_savings_rules(id) on delete set null` instead — `value` supersedes `amount` or `percentage`, whichever the rule's `allocation_type` uses.
+
+**Deletion behavior:** deleting a global event/rule does **not** delete its override rows — `ON DELETE SET NULL` (not cascade) means the delete action snapshots `orphaned_item_name`/`stale_since` onto them first, then the FK nulls `global_event_id`/`global_rule_id` automatically, surfacing them under "Needs review" on `/global-rules` instead of silently vanishing. Deleting a *scenario* still cascades its own override rows (via `scenario_id`) — that data genuinely stops mattering once the scenario is gone.
 
 ## Reference / seed data tables
 
@@ -422,11 +455,16 @@ income      ──< income_splits     >── household_members
 
 severance_scenarios
   ├─< severance_scenario_packages >── household_members
-  │     └─< severance_scenario_savings_rules
-  ├─< severance_scenario_events ──> tax_profiles (nullable, SET NULL)
+  │     └─< severance_scenario_savings_rules (scope="scenario")
+  ├─< severance_scenario_events (scope="scenario") ──> tax_profiles (nullable, SET NULL)
   ├─< severance_scenario_phases ──> living_profiles (RESTRICT)
   ├─< severance_scenario_property_ends ──> properties
-  └─< scenario_checklist_items
+  ├─< scenario_checklist_items
+  ├─< severance_global_event_overrides ──> severance_scenario_events (nullable, SET NULL)
+  └─< severance_global_savings_rule_overrides ──> severance_scenario_savings_rules (nullable, SET NULL)
+
+severance_scenario_events (scope="global", scenario_id null — no scenario/member FK)
+severance_scenario_savings_rules (scope="global", scenario_id/package_id null) ──> household_members
 
 tax_year_parameters (global reference, keyed by year)
 unemployment_benefit_parameters (global reference, keyed by year)
@@ -435,5 +473,5 @@ unemployment_benefit_parameters (global reference, keyed by year)
 **ON DELETE behavior worth remembering:**
 
 - Almost everything cascades from `auth.users` and from its immediate parent (household member / scenario / commitment / property / income), so deleting a user or a top-level entity cleans up its whole subtree.
-- Exceptions: `commitments.property_id`, `income.tax_profile_id`, `severance_scenario_events.recurring_tax_profile_id` are `ON DELETE SET NULL` (soft unlink rather than cascade delete).
+- Exceptions: `commitments.property_id`, `income.tax_profile_id`, `severance_scenario_events.recurring_tax_profile_id`, and the two override tables' `global_event_id`/`global_rule_id` are `ON DELETE SET NULL` (soft unlink rather than cascade delete — the override tables' delete actions snapshot onto the row first, turning the null-out into a "flagged for review" state rather than a silent unlink).
 - `severance_scenario_phases.profile_id` is `ON DELETE RESTRICT` — the only restrictive FK in the schema.

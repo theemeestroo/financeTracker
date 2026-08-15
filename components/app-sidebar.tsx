@@ -10,6 +10,7 @@ import {
   TrendingDown,
   Home,
   Layers,
+  Globe,
   PlaneTakeoff,
   HelpCircle,
   LogOut,
@@ -36,6 +37,7 @@ const NAV_ITEMS = [
   { href: "/household", label: "Household", icon: Users },
   { href: "/profiles", label: "Living Profiles", icon: Layers },
   { href: "/severance-scenarios", label: "Severance Scenarios", icon: TrendingDown },
+  { href: "/global-rules", label: "Global Rules", icon: Globe },
 ];
 
 function isItemActive(pathname: string, href: string) {

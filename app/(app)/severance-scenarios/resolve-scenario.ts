@@ -9,7 +9,7 @@ import {
 } from "@/lib/tax";
 import { calculateSeveranceNet } from "@/lib/tax/fuenftelregelung";
 import type { AnnualPersonTaxSummary, AnnualSeveranceTax } from "@/lib/tax";
-import { calculateSeverancePackage } from "@/lib/severance";
+import { calculateSeverancePackage, mergeScenarioEvents, mergeScenarioSavingsRules } from "@/lib/severance";
 import {
   alg1DurationMonths,
   alg1MonthlyNet,
@@ -41,7 +41,10 @@ import type {
   HouseholdMember,
   Income,
   IncomeSplit,
+  SeveranceGlobalEventOverride,
+  SeveranceGlobalSavingsRuleOverride,
   SeveranceScenario,
+  SeveranceScenarioEvent,
   SeveranceScenarioPackage,
   SeveranceScenarioSavingsRule,
   TaxProfileRow,
@@ -177,9 +180,13 @@ export async function resolveScenario(
     { data: packageRows },
     { data: phaseRows },
     { data: eventRows },
+    { data: globalEventRows },
+    { data: eventOverrideRows },
     { data: taxProfiles },
     { data: memberRows },
     { data: savingsRuleRows },
+    { data: globalSavingsRuleRows },
+    { data: savingsRuleOverrideRows },
     { data: allIncomeRows },
   ] = await Promise.all([
       supabase
@@ -192,7 +199,11 @@ export async function resolveScenario(
         .select("id, profile_id, start_date, label")
         .eq("scenario_id", scenario.id)
         .order("start_date"),
+      // scope="global" rows have scenario_id=null, so this already excludes
+      // them — global events are fetched separately below and merged in.
       supabase.from("severance_scenario_events").select("*").eq("scenario_id", scenario.id),
+      supabase.from("severance_scenario_events").select("*").eq("scope", "global"),
+      supabase.from("severance_global_event_overrides").select("*").eq("scenario_id", scenario.id),
       supabase
         .from("tax_profiles")
         .select("id, household_member_id, tax_class, church_tax, church_tax_state, has_children"),
@@ -201,7 +212,10 @@ export async function resolveScenario(
         .select(
           "id, name, created_at, date_of_birth, statutory_health_insurance, health_insurance_addon_rate, private_health_insurance_monthly_premium, count_private_health_insurance_as_outgoing"
         ),
+      // Same scope="global" exclusion as events above.
       supabase.from("severance_scenario_savings_rules").select("*").eq("scenario_id", scenario.id),
+      supabase.from("severance_scenario_savings_rules").select("*").eq("scope", "global"),
+      supabase.from("severance_global_savings_rule_overrides").select("*").eq("scenario_id", scenario.id),
       // Fetched unscoped by profile (RLS already limits this to the
       // household's own rows) — needed below to fold non-salary income into
       // the severance's own Fünftelregelung base *before* profileIds (which
@@ -449,18 +463,27 @@ export async function resolveScenario(
     );
   }
 
-  // Savings/investment rules (per-package — see the migration's own
-  // comment for why) — resolve amount-vs-percentage against that package's
-  // own severance base (net, same net-first/gross-fallback convention as
-  // netSeveranceLumpSum below) into a flat EUR principal, which then
-  // compounds forward as its own segregated pot independent of the
-  // household's running balance (see lib/runway/savings.ts), anchored to
-  // the same gardenLeaveEndDate the health-insurance cutoff above uses —
-  // the month the lump sum actually lands.
+  // Savings/investment rules — resolve amount-vs-percentage against that
+  // package's own severance base (net, same net-first/gross-fallback
+  // convention as netSeveranceLumpSum below) into a flat EUR principal,
+  // which then compounds forward as its own segregated pot independent of
+  // the household's running balance (see lib/runway/savings.ts), anchored
+  // to the same gardenLeaveEndDate the health-insurance cutoff above uses —
+  // the month the lump sum actually lands. Scenario-scoped rows validate
+  // against their own package directly; global rows (see global-items.ts)
+  // resolve against *this scenario's* package for the rule's household
+  // member, with any scenario-local override already folded in.
   const packageSummaryById = new Map(packageSummaries.map((s) => [s.package.id, s]));
-  const savingsRules: ResolvedSavingsRule[] = ((savingsRuleRows ?? []) as SeveranceScenarioSavingsRule[])
+  const packageIdByMember = new Map(packageSummaries.map((s) => [s.package.household_member_id, s.package.id]));
+  const mergedSavingsRules = mergeScenarioSavingsRules(
+    (savingsRuleRows ?? []) as SeveranceScenarioSavingsRule[],
+    (globalSavingsRuleRows ?? []) as SeveranceScenarioSavingsRule[],
+    (savingsRuleOverrideRows ?? []) as SeveranceGlobalSavingsRuleOverride[],
+    packageIdByMember
+  );
+  const savingsRules: ResolvedSavingsRule[] = mergedSavingsRules
     .map((rule) => {
-      const summary = packageSummaryById.get(rule.package_id);
+      const summary = packageSummaryById.get(rule.packageId);
       if (!summary) return null; // package deleted out from under an orphaned rule
       const severanceBase = summary.netSeverance ?? summary.severanceGross;
       const principal = resolveSavingsPrincipal(rule, severanceBase);
@@ -504,7 +527,11 @@ export async function resolveScenario(
         income: incomeByProfile.get(p.profile_id) ?? [],
       },
     })),
-    events: (eventRows ?? []).map((e) => ({
+    events: mergeScenarioEvents(
+      (eventRows ?? []) as SeveranceScenarioEvent[],
+      (globalEventRows ?? []) as SeveranceScenarioEvent[],
+      (eventOverrideRows ?? []) as SeveranceGlobalEventOverride[]
+    ).map((e) => ({
       name: e.name,
       date: e.date,
       eventType: e.event_type,

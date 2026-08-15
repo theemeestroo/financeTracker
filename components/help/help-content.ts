@@ -183,7 +183,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "Duplicate (next to Edit, on the scenario page, and on each card in the scenario list) makes a full copy — packages, phases, events, property-ends, and savings rules — under a new name, and takes you straight to it. It's the fastest way to try a different multiplier, bonus inclusion, or garden-leave length: duplicate a known-good scenario, then edit the copy's package(s) rather than re-entering everything from scratch. Delete removes a scenario and everything in it — packages, phases, events, checklist, savings rules — permanently.",
+        text: "Duplicate (next to Edit, on the scenario page, and on each card in the scenario list) makes a full copy — packages, phases, events, property-ends, and savings rules — under a new name, and takes you straight to it. It's the fastest way to try a different multiplier, bonus inclusion, or garden-leave length: duplicate a known-good scenario, then edit the copy's package(s) rather than re-entering everything from scratch. Only this scenario's own (non-global) events/rules are copied — the copy still sees every global event/rule fresh, with no overrides carried over. Delete removes a scenario and everything in it — packages, phases, events, checklist, savings rules, and any per-scenario overrides — permanently.",
       },
     ],
   },
@@ -269,6 +269,30 @@ export const HELP_ARTICLES: HelpArticle[] = [
     ],
   },
   {
+    slug: "global-events-and-rules",
+    title: "Global events & rules",
+    category: "Severance & redundancy scenarios",
+    summary: "Mark a one-off event or savings rule as \"All scenarios\" so it applies everywhere without copy-pasting it into each one.",
+    blocks: [
+      {
+        type: "p",
+        text: "Every one-off event and savings rule is either scoped to the one scenario it was created in, or global — applying to every scenario at once. Pick which when you add it: the add form has an \"Applies to\" toggle for \"This scenario only\" vs. \"All scenarios.\" Choosing \"All scenarios\" creates it directly in the Global list, not inside whichever scenario you happened to be viewing.",
+      },
+      {
+        type: "p",
+        text: "Global Rules (in the sidebar) is the dedicated home for these — view and edit them there without opening any particular scenario. Inside a scenario's own Timeline and Savings & Investment tabs, global items show up merged alongside that scenario's own, each labeled with a Global or Scenario badge. Editing a global item — from either place — edits the single shared object, and the change applies everywhere it's referenced immediately.",
+      },
+      {
+        type: "p",
+        text: "If just the amount needs to differ for one scenario, use Override right from that scenario's merged list — it supersedes the global default there only, without splitting the item into a separate copy; the row picks up an \"Overridden here\" badge, and a reset icon clears it back to the shared default. If more than the amount needs to diverge, use \"duplicate into this scenario\" instead — it makes a fully independent scenario-only copy seeded from the current values, and the global item stops counting in that one scenario so nothing is double-counted.",
+      },
+      {
+        type: "note",
+        text: "Deleting a global item doesn't delete any per-scenario overrides tied to it — they're kept and flagged under \"Needs review\" on the Global Rules page so you can see which scenarios had one before deciding what to do.",
+      },
+    ],
+  },
+  {
     slug: "savings-and-investment-rules",
     title: "Savings & Investment rules",
     category: "Severance & redundancy scenarios",
@@ -277,6 +301,10 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         type: "p",
         text: "A rule sets aside either a fixed amount or a percentage of one package's own net severance, plus an annual return rate and how often it's applied (monthly, quarterly, or annually). The form won't let a package's rules add up to more than its own severance — the available headroom is shown live as you allocate.",
+      },
+      {
+        type: "p",
+        text: "A rule can also be marked global (see Global events & rules) instead of tied to one scenario's package — it's set up against a household member instead, and resolves against whichever package that person has in each scenario it's viewed from, so the same rule can produce a different pot size per scenario.",
       },
       {
         type: "p",
@@ -332,7 +360,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "One-off events add a single inflow or outflow on a specific date (e.g. a lump-sum expense, an unexpected payment), or start a new recurring income stream from a date onward (e.g. modeling a new job before you know the exact terms — the variant generator, below, automates this for job-search timing specifically).",
+        text: "One-off events add a single inflow or outflow on a specific date (e.g. a lump-sum expense, an unexpected payment), or start a new recurring income stream from a date onward (e.g. modeling a new job before you know the exact terms — the variant generator, below, automates this for job-search timing specifically). An event can also be marked global instead of scoped to this one scenario — see Global events & rules.",
       },
     ],
   },
@@ -472,9 +500,10 @@ export const HELP_ARTICLES: HelpArticle[] = [
           "Properties — createProperty, updateProperty, deleteProperty, plus ownership splits.",
           "Living Profiles — createLivingProfile, cloneLivingProfile (also duplicates the source profile's commitments/income), updateLivingProfile, deleteLivingProfile, updateCurrentLiquidSavings (the baseline's \"do-nothing\" reference figure).",
           "Severance scenarios — createScenario, updateScenario, deleteScenario (cascades to every child table); duplicateScenario deep-clones a scenario's packages/phases/events/property-ends/savings rules into a new one and takes you straight to it.",
-          "Scenario packages, phases, events & property-ends — addScenarioPackage/updateScenarioPackage/deleteScenarioPackage; addScenarioPhase/deleteScenarioPhase; addScenarioEvent/deleteScenarioEvent; addScenarioPropertyEnd/deleteScenarioPropertyEnd.",
+          "Scenario packages, phases, events & property-ends — addScenarioPackage/updateScenarioPackage/deleteScenarioPackage; addScenarioPhase/deleteScenarioPhase; addScenarioEvent/deleteScenarioEvent (creates directly in the Global list instead when scoped \"All scenarios\"), setEventOverride/clearEventOverride/duplicateGlobalEventIntoScenario/dismissStaleEventOverride; addScenarioPropertyEnd/deleteScenarioPropertyEnd.",
           "Scenario checklist — addChecklistItem, toggleChecklistItem, deleteChecklistItem.",
-          "Savings & investment rules — addSavingsRule (re-validates the target package's own headroom server-side, not just in the form), deleteSavingsRule.",
+          "Savings & investment rules — addSavingsRule (re-validates the target package's own headroom server-side, not just in the form), deleteSavingsRule, setSavingsRuleOverride/clearSavingsRuleOverride/duplicateGlobalSavingsRuleIntoScenario/dismissStaleSavingsRuleOverride.",
+          "Global events & rules — addGlobalEvent/updateGlobalEvent/deleteGlobalEvent, addGlobalSavingsRule/updateGlobalSavingsRule/deleteGlobalSavingsRule: the shared objects behind Global Rules, edited independently of any scenario. Deleting one flags (doesn't delete) any scenario override tied to it.",
           "Scenario variants — generateScenarioVariants: bulk-creates several derived scenarios (different job-search timing assumptions) in one step.",
         ],
       },

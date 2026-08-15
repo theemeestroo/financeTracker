@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
@@ -8,6 +7,7 @@ import {
   CalendarClock,
   CalendarRange,
   Copy,
+  CopyPlus,
   Home,
   Landmark,
   LayoutGrid,
@@ -17,6 +17,7 @@ import {
   PiggyBank,
   Plus,
   Receipt,
+  RotateCcw,
   Route,
   Scissors,
   ShieldCheck,
@@ -37,14 +38,26 @@ import {
   resolveSavingsPrincipal,
 } from "@/lib/runway";
 import { getBaselineRunwayInputs } from "@/lib/finance/baseline-profile";
-import { pensionWartezeitTimeline } from "@/lib/severance";
-import { addScenarioEvent, deleteScenarioEvent } from "../event-actions";
+import { pensionWartezeitTimeline, mergeScenarioEvents, mergeScenarioSavingsRules } from "@/lib/severance";
+import {
+  addScenarioEvent,
+  deleteScenarioEvent,
+  setEventOverride,
+  clearEventOverride,
+  duplicateGlobalEventIntoScenario,
+} from "../event-actions";
 import { addScenarioPhase, deleteScenarioPhase } from "../phase-actions";
 import { addScenarioPackage, deleteScenarioPackage } from "../package-actions";
 import { addScenarioPropertyEnd, deleteScenarioPropertyEnd } from "../property-end-actions";
 import { generateScenarioVariants } from "../variant-actions";
 import { addChecklistItem, deleteChecklistItem, toggleChecklistItem } from "../checklist-actions";
-import { addSavingsRule, deleteSavingsRule } from "../savings-rule-actions";
+import {
+  addSavingsRule,
+  deleteSavingsRule,
+  setSavingsRuleOverride,
+  clearSavingsRuleOverride,
+  duplicateGlobalSavingsRuleIntoScenario,
+} from "../savings-rule-actions";
 import { EventForm } from "../event-form";
 import { PhaseForm } from "../phase-form";
 import { PackageForm } from "../package-form";
@@ -66,6 +79,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { DeleteButton } from "@/components/delete-button";
+import { AddDisclosure } from "@/components/add-disclosure";
+import { TitleIcon } from "@/components/title-icon";
+import { OverridePopover } from "@/components/override-popover";
 import { ChecklistItemCheckbox } from "@/components/checklist-item-checkbox";
 import { RunwayProjection } from "@/components/charts/runway-projection";
 import { TaxBracketBar } from "@/components/charts/tax-bracket-bar";
@@ -78,7 +94,10 @@ import type {
   LivingProfile,
   Property,
   ScenarioChecklistItem,
+  SeveranceGlobalEventOverride,
+  SeveranceGlobalSavingsRuleOverride,
   SeveranceScenario,
+  SeveranceScenarioEvent,
   SeveranceScenarioPackage,
   SeveranceScenarioPropertyEnd,
   SeveranceScenarioSavingsRule,
@@ -125,42 +144,6 @@ function StatTile({
   );
 }
 
-/** Small icon chip used before a CardTitle's uppercase label — the same
- *  accent language as StatTile, at section-header scale. */
-function TitleIcon({ icon: Icon, accent }: { icon: LucideIcon; accent: string }) {
-  return (
-    <span
-      className="flex size-5 shrink-0 items-center justify-center rounded-full"
-      style={{ backgroundColor: `color-mix(in oklch, ${accent} 20%, transparent)`, color: accent }}
-    >
-      <Icon className="size-3" />
-    </span>
-  );
-}
-
-/** A "+ Add X" disclosure — the plus rotates into a close glyph when open. */
-function AddDisclosure({
-  label,
-  icon: Icon,
-  children,
-}: {
-  label: string;
-  icon: LucideIcon;
-  children: ReactNode;
-}) {
-  return (
-    <details className="group rounded-2xl border border-dashed border-border p-4 open:bg-muted/40">
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-muted-foreground [&::-webkit-details-marker]:hidden group-open:text-foreground">
-        <span className="flex size-6 items-center justify-center rounded-full bg-muted text-foreground transition-transform duration-200 group-open:rotate-45">
-          <Icon className="size-3.5" />
-        </span>
-        {label}
-      </summary>
-      <div className="mt-4">{children}</div>
-    </details>
-  );
-}
-
 export default async function ScenarioDetailPage({
   params,
 }: {
@@ -175,11 +158,15 @@ export default async function ScenarioDetailPage({
     { data: profiles },
     { data: phaseRows },
     { data: eventRows },
+    { data: globalEventRows },
+    { data: eventOverrideRows },
     { data: properties },
     { data: propertyEndRows },
     { data: packageRows },
     { data: checklistRows },
     { data: savingsRuleRows },
+    { data: globalSavingsRuleRows },
+    { data: savingsRuleOverrideRows },
   ] = await Promise.all([
     supabase.from("severance_scenarios").select("*").eq("id", id).single(),
     supabase.from("household_members").select("id, name, created_at"),
@@ -190,6 +177,8 @@ export default async function ScenarioDetailPage({
       .eq("scenario_id", id)
       .order("start_date"),
     supabase.from("severance_scenario_events").select("*").eq("scenario_id", id).order("date"),
+    supabase.from("severance_scenario_events").select("*").eq("scope", "global").order("date"),
+    supabase.from("severance_global_event_overrides").select("*").eq("scenario_id", id),
     supabase.from("properties").select("id, profile_id, name, address, notes, end_date").order("name"),
     supabase
       .from("severance_scenario_property_ends")
@@ -211,6 +200,8 @@ export default async function ScenarioDetailPage({
       .select("*")
       .eq("scenario_id", id)
       .order("created_at"),
+    supabase.from("severance_scenario_savings_rules").select("*").eq("scope", "global").order("created_at"),
+    supabase.from("severance_global_savings_rule_overrides").select("*").eq("scenario_id", id),
   ]);
 
   if (!scenario) notFound();
@@ -274,26 +265,44 @@ export default async function ScenarioDetailPage({
   const defaultTaxYear =
     annualTaxSummaries.find((s) => s.severance.gross > 0)?.year ?? taxYearsAvailable[0];
 
-  // Savings/investment rules — resolve each against its own package's net
-  // severance base (net ?? gross, same fallback used throughout this page)
-  // for display, and hand the form the same headroom the server action
-  // itself re-validates.
-  const savingsRules = (savingsRuleRows ?? []) as SeveranceScenarioSavingsRule[];
+  // One-off events — this scenario's own rows merged with every applicable
+  // global event (override-aware, "duplicate into this scenario" excluded)
+  // — see global-items.ts. Shared with resolve-scenario.ts's own merge so
+  // the Timeline tab can never disagree with what actually fed the projection.
+  const mergedEvents = mergeScenarioEvents(
+    (eventRows ?? []) as SeveranceScenarioEvent[],
+    (globalEventRows ?? []) as SeveranceScenarioEvent[],
+    (eventOverrideRows ?? []) as SeveranceGlobalEventOverride[]
+  );
+
+  // Savings/investment rules — this scenario's own rows merged with every
+  // applicable global rule (resolved against this scenario's own package
+  // for that rule's household member), then each resolved against its
+  // package's net severance base (net ?? gross, same fallback used
+  // throughout this page) for display — the same headroom the server
+  // action itself re-validates.
+  const packageIdByMember = new Map(packages.map((p) => [p.household_member_id, p.id]));
+  const mergedSavingsRules = mergeScenarioSavingsRules(
+    (savingsRuleRows ?? []) as SeveranceScenarioSavingsRule[],
+    (globalSavingsRuleRows ?? []) as SeveranceScenarioSavingsRule[],
+    (savingsRuleOverrideRows ?? []) as SeveranceGlobalSavingsRuleOverride[],
+    packageIdByMember
+  );
   const severanceBaseByPackage = new Map(
     packageSummaries.map((s) => [s.package.id, s.netSeverance ?? s.severanceGross])
   );
   const resolvedAmountByRule = new Map(
-    savingsRules.map((rule) => [
+    mergedSavingsRules.map((rule) => [
       rule.id,
-      resolveSavingsPrincipal(rule, severanceBaseByPackage.get(rule.package_id) ?? 0),
+      resolveSavingsPrincipal(rule, severanceBaseByPackage.get(rule.packageId) ?? 0),
     ])
   );
   const packageOptions: PackageAllocationOption[] = packageSummaries.map((s) => ({
     id: s.package.id,
     memberName: memberById.get(s.package.household_member_id) ?? "—",
     severanceBase: s.netSeverance ?? s.severanceGross,
-    alreadyAllocated: savingsRules
-      .filter((r) => r.package_id === s.package.id)
+    alreadyAllocated: mergedSavingsRules
+      .filter((r) => r.packageId === s.package.id)
       .reduce((sum, r) => sum + (resolvedAmountByRule.get(r.id) ?? 0), 0),
   }));
 
@@ -894,7 +903,7 @@ export default async function ScenarioDetailPage({
                         ))}
                       </div>
 
-                      {savingsRules.length > 0 && (
+                      {mergedSavingsRules.length > 0 && (
                         <Table aria-label="Savings and investment rules">
                           <TableHeader>
                             <TableRow>
@@ -910,20 +919,43 @@ export default async function ScenarioDetailPage({
                                 Example, /mo
                               </TableHead>
                               <TableHead scope="col">Accrued</TableHead>
-                              <TableHead scope="col" className="w-12 text-right">
+                              <TableHead scope="col" className="w-56 text-right">
                                 &nbsp;
                               </TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {savingsRules.map((rule) => {
-                              const option = packageOptions.find((p) => p.id === rule.package_id);
+                            {mergedSavingsRules.map((rule) => {
+                              const option = packageOptions.find((p) => p.id === rule.packageId);
                               const resolved = resolvedAmountByRule.get(rule.id) ?? 0;
                               const exampleMonthly = (resolved * rule.annual_return_pct) / 100 / 12;
+                              const currentOverrideValue =
+                                rule.allocation_type === "percentage" ? rule.percentage : rule.amount;
                               return (
                                 <TableRow key={rule.id}>
                                   <TableCell className="font-medium">{option?.memberName ?? "—"}</TableCell>
-                                  <TableCell className="text-muted-foreground">{rule.name}</TableCell>
+                                  <TableCell className="text-muted-foreground">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      {rule.scope === "global" ? (
+                                        <Link
+                                          href={`/global-rules/savings-rules/${rule.id}/edit`}
+                                          className="underline underline-offset-2"
+                                        >
+                                          {rule.name}
+                                        </Link>
+                                      ) : (
+                                        rule.name
+                                      )}
+                                      <Badge variant="outline" className="text-xs font-normal">
+                                        {rule.scope === "global" ? "Global" : "Scenario"}
+                                      </Badge>
+                                      {rule.isOverridden && (
+                                        <Badge variant="outline" className="text-xs font-normal">
+                                          Overridden here
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </TableCell>
                                   <TableCell className="text-right tabular-nums">
                                     {rule.allocation_type === "percentage"
                                       ? `${rule.percentage}% (${formatEUR(resolved)})`
@@ -940,10 +972,45 @@ export default async function ScenarioDetailPage({
                                       rule.accrual_frequency}
                                   </TableCell>
                                   <TableCell className="text-right">
-                                    <DeleteButton
-                                      action={deleteSavingsRule.bind(null, rule.id, id)}
-                                      confirmMessage={`Delete "${rule.name}"?`}
-                                    />
+                                    {rule.scope === "global" ? (
+                                      <div className="flex justify-end gap-1.5">
+                                        {rule.isOverridden && (
+                                          <form
+                                            action={clearSavingsRuleOverride.bind(null, rule.id, id)}
+                                          >
+                                            <Button
+                                              type="submit"
+                                              variant="ghost"
+                                              size="icon"
+                                              aria-label="Clear override"
+                                            >
+                                              <RotateCcw className="size-4" />
+                                            </Button>
+                                          </form>
+                                        )}
+                                        <OverridePopover
+                                          action={setSavingsRuleOverride.bind(null, rule.id, id)}
+                                          currentValue={currentOverrideValue}
+                                        />
+                                        <form
+                                          action={duplicateGlobalSavingsRuleIntoScenario.bind(null, rule.id, id)}
+                                        >
+                                          <Button
+                                            type="submit"
+                                            variant="ghost"
+                                            size="icon"
+                                            aria-label="Duplicate into this scenario"
+                                          >
+                                            <CopyPlus className="size-4" />
+                                          </Button>
+                                        </form>
+                                      </div>
+                                    ) : (
+                                      <DeleteButton
+                                        action={deleteSavingsRule.bind(null, rule.id, id)}
+                                        confirmMessage={`Delete "${rule.name}"?`}
+                                      />
+                                    )}
                                   </TableCell>
                                 </TableRow>
                               );
@@ -951,7 +1018,7 @@ export default async function ScenarioDetailPage({
                           </TableBody>
                         </Table>
                       )}
-                      {savingsRules.length > 0 && (
+                      {mergedSavingsRules.length > 0 && (
                         <p className="text-xs text-muted-foreground">
                           Example, /mo is the pot&apos;s starting gross return spread evenly across the year
                           (allocation × annual return ÷ 12) — a steady-state estimate before tax, not the
@@ -963,7 +1030,12 @@ export default async function ScenarioDetailPage({
                       )}
 
                       <AddDisclosure label="Add savings rule" icon={Plus}>
-                        <SavingsRuleForm action={addSavingsRule.bind(null, id)} packages={packageOptions} />
+                        <SavingsRuleForm
+                          action={addSavingsRule.bind(null, id)}
+                          packages={packageOptions}
+                          householdMembers={(members ?? []) as HouseholdMember[]}
+                          showScopeToggle
+                        />
                       </AddDisclosure>
                     </>
                   )}
@@ -1300,7 +1372,7 @@ export default async function ScenarioDetailPage({
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
-                  {(eventRows ?? []).length > 0 && (
+                  {mergedEvents.length > 0 && (
                     <Table aria-label="Scenario events">
                       <TableHeader>
                         <TableRow>
@@ -1310,38 +1382,96 @@ export default async function ScenarioDetailPage({
                           <TableHead scope="col" className="text-right">
                             Amount
                           </TableHead>
-                          <TableHead scope="col" className="w-12 text-right">
+                          <TableHead scope="col" className="w-56 text-right">
                             &nbsp;
                           </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {(eventRows ?? []).map((event) => (
-                          <TableRow key={event.id}>
-                            <TableCell className="font-medium">{event.name}</TableCell>
-                            <TableCell>
-                              {SCENARIO_EVENT_TYPES.find((t) => t.value === event.event_type)?.label ??
-                                event.event_type}
-                            </TableCell>
-                            <TableCell className="tabular-nums">{formatDateDisplay(event.date)}</TableCell>
-                            <TableCell className="text-right tabular-nums">
-                              {event.event_type === "recurring_income_start"
-                                ? `${formatEUR(event.recurring_gross_amount ?? 0)}/${event.recurring_frequency}`
-                                : formatEUR(event.amount ?? 0)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <DeleteButton
-                                action={deleteScenarioEvent.bind(null, event.id, id)}
-                                confirmMessage={`Delete "${event.name}"?`}
-                              />
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {mergedEvents.map((event) => {
+                          const currentOverrideValue =
+                            event.event_type === "recurring_income_start"
+                              ? event.recurring_gross_amount
+                              : event.amount;
+                          return (
+                            <TableRow key={event.id}>
+                              <TableCell className="font-medium">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {event.scope === "global" ? (
+                                    <Link
+                                      href={`/global-rules/events/${event.id}/edit`}
+                                      className="underline underline-offset-2"
+                                    >
+                                      {event.name}
+                                    </Link>
+                                  ) : (
+                                    event.name
+                                  )}
+                                  <Badge variant="outline" className="text-xs font-normal">
+                                    {event.scope === "global" ? "Global" : "Scenario"}
+                                  </Badge>
+                                  {event.isOverridden && (
+                                    <Badge variant="outline" className="text-xs font-normal">
+                                      Overridden here
+                                    </Badge>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {SCENARIO_EVENT_TYPES.find((t) => t.value === event.event_type)?.label ??
+                                  event.event_type}
+                              </TableCell>
+                              <TableCell className="tabular-nums">{formatDateDisplay(event.date)}</TableCell>
+                              <TableCell className="text-right tabular-nums">
+                                {event.event_type === "recurring_income_start"
+                                  ? `${formatEUR(event.recurring_gross_amount ?? 0)}/${event.recurring_frequency}`
+                                  : formatEUR(event.amount ?? 0)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {event.scope === "global" ? (
+                                  <div className="flex justify-end gap-1.5">
+                                    {event.isOverridden && (
+                                      <form action={clearEventOverride.bind(null, event.id, id)}>
+                                        <Button
+                                          type="submit"
+                                          variant="ghost"
+                                          size="icon"
+                                          aria-label="Clear override"
+                                        >
+                                          <RotateCcw className="size-4" />
+                                        </Button>
+                                      </form>
+                                    )}
+                                    <OverridePopover
+                                      action={setEventOverride.bind(null, event.id, id)}
+                                      currentValue={currentOverrideValue}
+                                    />
+                                    <form action={duplicateGlobalEventIntoScenario.bind(null, event.id, id)}>
+                                      <Button
+                                        type="submit"
+                                        variant="ghost"
+                                        size="icon"
+                                        aria-label="Duplicate into this scenario"
+                                      >
+                                        <CopyPlus className="size-4" />
+                                      </Button>
+                                    </form>
+                                  </div>
+                                ) : (
+                                  <DeleteButton
+                                    action={deleteScenarioEvent.bind(null, event.id, id)}
+                                    confirmMessage={`Delete "${event.name}"?`}
+                                  />
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   )}
                   <AddDisclosure label="Add event" icon={Plus}>
-                    <EventForm action={addScenarioEvent.bind(null, id)} />
+                    <EventForm action={addScenarioEvent.bind(null, id)} showScopeToggle />
                   </AddDisclosure>
                 </CardContent>
               </Card>

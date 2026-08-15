@@ -6,23 +6,62 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
-import { INCOME_FREQUENCIES, SCENARIO_EVENT_TYPES, type ScenarioEventType } from "@/lib/types";
+import {
+  INCOME_FREQUENCIES,
+  SCENARIO_EVENT_TYPES,
+  SCENARIO_ITEM_SCOPES,
+  type ScenarioEventType,
+  type ScenarioItemScope,
+  type SeveranceScenarioEvent,
+} from "@/lib/types";
 import type { FormState } from "./event-actions";
 
 export function EventForm({
   action,
+  defaultValues,
+  showScopeToggle = false,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
+  defaultValues?: Partial<SeveranceScenarioEvent>;
+  /** Only the scenario page's own "add event" form offers this — the
+   *  Global list's add/edit forms are implicitly always scope="global". */
+  showScopeToggle?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
-  const [eventType, setEventType] = useState<ScenarioEventType>("one_off_outflow");
+  const [eventType, setEventType] = useState<ScenarioEventType>(
+    defaultValues?.event_type ?? "one_off_outflow"
+  );
+  const [scope, setScope] = useState<ScenarioItemScope>(defaultValues?.scope ?? "scenario");
 
   return (
     <form action={formAction} className="flex flex-col gap-3">
+      {showScopeToggle && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Applies to</span>
+          <div className="flex gap-2">
+            {SCENARIO_ITEM_SCOPES.map((s) => (
+              <button
+                key={s.value}
+                type="button"
+                onClick={() => setScope(s.value)}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                  scope === s.value
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border hover:bg-muted"
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <input type="hidden" name="scope" value={scope} />
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="event_name">Name</Label>
-          <Input id="event_name" name="name" required />
+          <Input id="event_name" name="name" defaultValue={defaultValues?.name} required />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="event_type">Type</Label>
@@ -45,7 +84,7 @@ export function EventForm({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="event_start_date">Start date</Label>
-            <DatePicker id="event_start_date" name="date" />
+            <DatePicker id="event_start_date" name="date" defaultValue={defaultValues?.date} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="recurring_gross_amount">Gross amount</Label>
@@ -55,12 +94,17 @@ export function EventForm({
               type="number"
               step="0.01"
               min="0"
+              defaultValue={defaultValues?.recurring_gross_amount ?? undefined}
               required
             />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="recurring_frequency">Frequency</Label>
-            <NativeSelect id="recurring_frequency" name="recurring_frequency" defaultValue="monthly">
+            <NativeSelect
+              id="recurring_frequency"
+              name="recurring_frequency"
+              defaultValue={defaultValues?.recurring_frequency ?? "monthly"}
+            >
               {INCOME_FREQUENCIES.map((f) => (
                 <option key={f.value} value={f.value}>
                   {f.label}
@@ -70,18 +114,30 @@ export function EventForm({
           </div>
           <div className="col-span-3 flex flex-col gap-1.5">
             <Label htmlFor="recurring_end_date">End date (optional)</Label>
-            <DatePicker id="recurring_end_date" name="recurring_end_date" />
+            <DatePicker
+              id="recurring_end_date"
+              name="recurring_end_date"
+              defaultValue={defaultValues?.recurring_end_date}
+            />
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="event_date">Date</Label>
-            <DatePicker id="event_date" name="date" />
+            <DatePicker id="event_date" name="date" defaultValue={defaultValues?.date} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="amount">Amount</Label>
-            <Input id="amount" name="amount" type="number" step="0.01" min="0" required />
+            <Input
+              id="amount"
+              name="amount"
+              type="number"
+              step="0.01"
+              min="0"
+              defaultValue={defaultValues?.amount ?? undefined}
+              required
+            />
           </div>
         </div>
       )}
@@ -93,7 +149,7 @@ export function EventForm({
       )}
 
       <Button type="submit" disabled={pending} size="sm" className="self-start">
-        {pending ? "Adding…" : "Add event"}
+        {pending ? "Saving…" : defaultValues ? "Save changes" : "Add event"}
       </Button>
     </form>
   );

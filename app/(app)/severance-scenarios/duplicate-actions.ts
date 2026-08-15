@@ -23,6 +23,12 @@ import type {
  * Checklist items are deliberately not copied — they're task-completion
  * state tied to a specific real plan, not a modeling assumption, same
  * choice `generateScenarioVariants` already makes for its own variants.
+ *
+ * Global events/savings rules (scope="global") are deliberately excluded
+ * from every query below — `.eq("scenario_id", sourceScenarioId)` already
+ * does this for free, since a global row's own scenario_id is null. The new
+ * scenario starts fresh against the same global defaults (no overrides
+ * carried over) rather than forking them.
  */
 export async function duplicateScenario(sourceScenarioId: string) {
   const supabase = await createClient();
@@ -114,6 +120,9 @@ export async function duplicateScenario(sourceScenarioId: string) {
       );
       const remappedRules = savingsRules
         .map((rule) => {
+          // Always set — savingsRules is already scenario-scoped (fetched
+          // via .eq("scenario_id", ...), which excludes scope="global" rows).
+          if (!rule.package_id) return null;
           const memberId = memberByOldPackageId.get(rule.package_id);
           const newPackageId = memberId ? newPackageIdByMember.get(memberId) : undefined;
           if (!newPackageId) return null;

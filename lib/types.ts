@@ -292,17 +292,35 @@ export const ACCRUAL_FREQUENCIES: { value: AccrualFrequency; label: string }[] =
   { value: "annually", label: "Annually" },
 ];
 
+/** Whether a one-off event/savings rule belongs to one scenario, or applies
+ *  to all of them from a single shared object (see
+ *  app/(app)/severance-scenarios/global-items.ts for how the two merge into
+ *  a scenario's projection). Set once at creation — not editable afterward,
+ *  since the "editing" surface for a global item is only its values. */
+export type ScenarioItemScope = "global" | "scenario";
+
+export const SCENARIO_ITEM_SCOPES: { value: ScenarioItemScope; label: string }[] = [
+  { value: "scenario", label: "This scenario only" },
+  { value: "global", label: "All scenarios" },
+];
+
 /** Sets aside part of one person's own net severance lump sum (a fixed
  *  amount, or a % of it — exactly one of `amount`/`percentage` is set, per
  *  `allocation_type`) and applies `annual_return_pct`, compounding every
  *  `accrual_frequency` — the accrued return (not the principal, which is
  *  already counted once via the lump sum itself) shows up as income in the
- *  runway projection. Per-package, not per-scenario: the allocation is
- *  validated against that specific person's own severance payout. */
+ *  runway projection. Scenario-scoped rows (`scope: "scenario"`) validate
+ *  the allocation against one package's own severance payout (`package_id`
+ *  set, `household_member_id` null). Global rows (`scope: "global"`) instead
+ *  carry `household_member_id` (`scenario_id`/`package_id` null) — a package
+ *  is inherently scenario-specific, so a global rule resolves per-scenario
+ *  against *that scenario's own* package for the same member. */
 export type SeveranceScenarioSavingsRule = {
   id: string;
-  scenario_id: string;
-  package_id: string;
+  scope: ScenarioItemScope;
+  scenario_id: string | null;
+  package_id: string | null;
+  household_member_id: string | null;
   name: string;
   allocation_type: SavingsAllocationType;
   amount: number | null;
@@ -313,9 +331,11 @@ export type SeveranceScenarioSavingsRule = {
 
 export type ScenarioEventType = "one_off_outflow" | "one_off_inflow" | "recurring_income_start";
 
+/** `scenario_id` is null exactly when `scope === "global"`. */
 export type SeveranceScenarioEvent = {
   id: string;
-  scenario_id: string;
+  scope: ScenarioItemScope;
+  scenario_id: string | null;
   name: string;
   event_type: ScenarioEventType;
   amount: number | null;
@@ -324,6 +344,39 @@ export type SeveranceScenarioEvent = {
   recurring_frequency: Frequency | null;
   recurring_tax_profile_id: string | null;
   recurring_end_date: string | null;
+};
+
+/** A per-scenario supersede of a global event's own amount/recurring_gross_amount
+ *  (never both — the merge logic reads whichever the event's own `event_type`
+ *  uses). `suppressed` (value left null) means this scenario has its own
+ *  independent scope="scenario" copy instead ("duplicate into this
+ *  scenario") — the global event stops contributing here so the two don't
+ *  double-count. `global_event_id`/`orphaned_item_name`/`stale_since`: see
+ *  `SeveranceGlobalSavingsRuleOverride`'s own comment — identical shape. */
+export type SeveranceGlobalEventOverride = {
+  id: string;
+  global_event_id: string | null;
+  scenario_id: string;
+  value: number | null;
+  suppressed: boolean;
+  orphaned_item_name: string | null;
+  stale_since: string | null;
+};
+
+/** A per-scenario supersede of a global savings rule's own amount/percentage
+ *  (whichever its `allocation_type` uses). `global_rule_id` is `ON DELETE SET
+ *  NULL` — deleting the global rule doesn't delete this row, it flags it
+ *  (`orphaned_item_name` + `stale_since`, set by the delete action just
+ *  before deleting) so the user can review which scenarios had an override
+ *  tied to the now-deleted rule instead of it silently vanishing. */
+export type SeveranceGlobalSavingsRuleOverride = {
+  id: string;
+  global_rule_id: string | null;
+  scenario_id: string;
+  value: number | null;
+  suppressed: boolean;
+  orphaned_item_name: string | null;
+  stale_since: string | null;
 };
 
 export type SeveranceScenarioPhase = {

@@ -15,3 +15,9 @@ export {
   type ChecklistTemplateItem,
   type GeneratedChecklistItem,
 } from "./checklist";
+export {
+  mergeScenarioEvents,
+  mergeScenarioSavingsRules,
+  type MergedScenarioEvent,
+  type MergedSavingsRule,
+} from "./global-items";
