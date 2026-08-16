@@ -5,7 +5,12 @@ export { calculateSoli } from "./soli";
 export { calculateChurchTax } from "./church-tax";
 export { taxableWageIncome } from "./taxable-income";
 export { calculateNetIncome, type NetIncomeBreakdown } from "./net-income";
-export { calculateSeveranceNet, type SeveranceTaxResult } from "./fuenftelregelung";
+export {
+  calculateSeveranceNet,
+  compareSeverancePaymentTiming,
+  type SeveranceTaxResult,
+  type SeverancePaymentTiming,
+} from "./fuenftelregelung";
 export { calculateCapitalGainsTax, type CapitalGainsTaxResult } from "./capital-gains-tax";
 export {
   taxBracketBreakdown,

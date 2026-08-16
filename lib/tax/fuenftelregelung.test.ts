@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateSeveranceNet } from "./fuenftelregelung";
+import { calculateSeveranceNet, compareSeverancePaymentTiming } from "./fuenftelregelung";
 import type { TaxProfile } from "@/lib/types";
 
 const profile: TaxProfile = {
@@ -40,5 +40,63 @@ describe("calculateSeveranceNet — Fünftelregelung", () => {
     const result = calculateSeveranceNet(0, 50000, profile, 2025);
     expect(result.taxOnSeverance).toBe(0);
     expect(result.netSeverance).toBe(0);
+  });
+});
+
+describe("compareSeverancePaymentTiming", () => {
+  const grossSeverance = 100000;
+  const monthlyBaseSalary = 8000;
+  const annualBonus = 10000;
+  const nonSalaryAnnualGross = 5000;
+
+  it("flags paidAfterEmploymentEnds only when the payment year is after the departure year", () => {
+    const sameYear = compareSeverancePaymentTiming(
+      grossSeverance, monthlyBaseSalary, annualBonus, nonSalaryAnnualGross, profile, 2025, 2025
+    );
+    expect(sameYear.paidAfterEmploymentEnds).toBe(false);
+
+    const nextYear = compareSeverancePaymentTiming(
+      grossSeverance, monthlyBaseSalary, annualBonus, nonSalaryAnnualGross, profile, 2025, 2026
+    );
+    expect(nextYear.paidAfterEmploymentEnds).toBe(true);
+  });
+
+  it("deferring past a full year's salary lowers the tax on the severance, vs. taking it immediately", () => {
+    const immediate = compareSeverancePaymentTiming(
+      grossSeverance, monthlyBaseSalary, annualBonus, nonSalaryAnnualGross, profile, 2025, 2025
+    );
+    const deferred = compareSeverancePaymentTiming(
+      grossSeverance, monthlyBaseSalary, annualBonus, nonSalaryAnnualGross, profile, 2025, 2026
+    );
+    // Deferred's actual outcome (no more salary that year) should owe less
+    // tax than immediate's actual outcome (a full year's salary stacked
+    // underneath it).
+    expect(deferred.actual.totalTaxOnSeverance).toBeLessThan(immediate.actual.totalTaxOnSeverance);
+    expect(deferred.actual.netSeverance).toBeGreaterThan(immediate.actual.netSeverance);
+  });
+
+  it("timingTaxSaving is negative when paying immediately (deferring would have been cheaper) and positive when deferring (confirms the saving)", () => {
+    const immediate = compareSeverancePaymentTiming(
+      grossSeverance, monthlyBaseSalary, annualBonus, nonSalaryAnnualGross, profile, 2025, 2025
+    );
+    const deferred = compareSeverancePaymentTiming(
+      grossSeverance, monthlyBaseSalary, annualBonus, nonSalaryAnnualGross, profile, 2025, 2026
+    );
+    expect(immediate.timingTaxSaving).toBeLessThan(0);
+    expect(deferred.timingTaxSaving).toBeGreaterThan(0);
+    // Same pair of years/scenarios viewed from either side — exact negatives.
+    expect(immediate.timingTaxSaving).toBeCloseTo(-deferred.timingTaxSaving, 5);
+  });
+
+  it("the alternate for an immediate payment excludes the salary base (deferred-to-next-January assumption)", () => {
+    const immediate = compareSeverancePaymentTiming(
+      grossSeverance, monthlyBaseSalary, annualBonus, nonSalaryAnnualGross, profile, 2025, 2025
+    );
+    const deferred = compareSeverancePaymentTiming(
+      grossSeverance, monthlyBaseSalary, annualBonus, nonSalaryAnnualGross, profile, 2025, 2026
+    );
+    // immediate's alternate (deferred outcome) and deferred's actual
+    // (also the deferred outcome) are the same computation.
+    expect(immediate.alternate.totalTaxOnSeverance).toBeCloseTo(deferred.actual.totalTaxOnSeverance, 5);
   });
 });

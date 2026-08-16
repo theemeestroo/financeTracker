@@ -135,12 +135,31 @@ describe("precedingMonthsSeries", () => {
     expect(feb.balance + marDelta).toBeCloseTo(mar.balance, 5);
   });
 
-  it("returns nothing when the severance already starts in January", () => {
+  it("reaches back into the previous calendar year to guarantee at least 3 months when the severance starts in January", () => {
     const points = precedingMonthsSeries({
       ...baseScenario,
       severances: [stream({ severanceStartDate: "2027-01-01" })],
     });
-    expect(points).toEqual([]);
+    expect(points.map((p) => p.date)).toEqual(["2026-10-01", "2026-11-01", "2026-12-01"]);
+  });
+
+  it("reaches back into the previous calendar year when the severance starts in February (only 1 month left in the new year otherwise)", () => {
+    const points = precedingMonthsSeries({
+      ...baseScenario,
+      severances: [stream({ severanceStartDate: "2027-02-01" })],
+    });
+    expect(points.map((p) => p.date)).toEqual(["2026-11-01", "2026-12-01", "2027-01-01"]);
+  });
+
+  it("still shows the whole calendar year when that's already more than 3 months (unchanged from before)", () => {
+    const points = precedingMonthsSeries({
+      ...baseScenario,
+      severances: [stream({ severanceStartDate: "2027-10-01" })],
+    });
+    expect(points.map((p) => p.date)).toEqual([
+      "2027-01-01", "2027-02-01", "2027-03-01", "2027-04-01", "2027-05-01",
+      "2027-06-01", "2027-07-01", "2027-08-01", "2027-09-01",
+    ]);
   });
 
   it("returns nothing when there are no phases or no severances", () => {

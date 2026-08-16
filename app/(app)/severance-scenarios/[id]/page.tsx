@@ -509,6 +509,23 @@ export default async function ScenarioDetailPage({
                   packageSummary.netSeverance != null && householdChangeSinceLumpSum != null
                     ? packageSummary.netSeverance + householdChangeSinceLumpSum
                     : null;
+                // Payment-timing callout — only shown once the saving/cost
+                // is more than rounding noise, since a €0 result (e.g. the
+                // payment date wasn't set separately and defaults to the
+                // same year work ends) has nothing useful to say.
+                const departureYear = Number(packageSummary.gardenLeaveEndDate.slice(0, 4));
+                const timingSaving = packageSummary.paymentTimingTaxSaving;
+                const showTimingCallout = timingSaving != null && Math.abs(timingSaving) >= 1;
+                const timingCalloutGood = (timingSaving ?? 0) > 0;
+                const timingCalloutText = !showTimingCallout
+                  ? null
+                  : packageSummary.paidAfterEmploymentEnds
+                    ? timingCalloutGood
+                      ? `saves ${formatEUR(timingSaving!)} vs. taking it in ${departureYear}`
+                      : `costs ${formatEUR(-timingSaving!)} more than taking it in ${departureYear} would have`
+                    : timingCalloutGood
+                      ? `already saves ${formatEUR(timingSaving!)} vs. deferring to January ${departureYear + 1}`
+                      : `delaying to January ${departureYear + 1} could save ${formatEUR(-timingSaving!)} more`;
                 return (
                   <Card key={pkg.id}>
                     <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
@@ -563,6 +580,12 @@ export default async function ScenarioDetailPage({
                           {packageSummary.taxSaving != null && (
                             <div className="text-xs text-muted-foreground">
                               saves {formatEUR(packageSummary.taxSaving)} vs. marginal
+                            </div>
+                          )}
+                          {packageSummary.hasTaxProfile && (
+                            <div className="text-xs text-muted-foreground">
+                              paid {formatDateDisplay(packageSummary.paymentDate)}
+                              {!pkg.severance_payment_date && " (default)"}
                             </div>
                           )}
                         </div>
@@ -664,6 +687,20 @@ export default async function ScenarioDetailPage({
                           </div>
                         </div>
                       </div>
+
+                      {timingCalloutText && (
+                        <div
+                          className="mt-4 rounded-lg border px-3 py-2 text-sm"
+                          style={
+                            timingCalloutGood
+                              ? { borderColor: "var(--status-good)", color: "var(--status-good)" }
+                              : { borderColor: "var(--status-warning)", color: "var(--status-warning)" }
+                          }
+                        >
+                          <span className="font-semibold">Payment timing — </span>
+                          {timingCalloutText}.
+                        </div>
+                      )}
 
                       {packageSummary.sperrzeitAtRisk && packageSummary.sperrzeitReason && (
                         <div

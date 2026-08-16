@@ -127,6 +127,7 @@ export async function generateScenarioVariants(
         notice_period_months: p.notice_period_months,
         gross_severance_override: p.gross_severance_override,
         severance_start_date: p.severance_start_date,
+        severance_payment_date: p.severance_payment_date,
         christmas_bonus_pct: p.christmas_bonus_pct,
         include_christmas_bonus_in_calc: p.include_christmas_bonus_in_calc,
         claim_unemployment_benefit: p.claim_unemployment_benefit,

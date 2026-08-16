@@ -1,13 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   getCurrentTaxYear,
-  calculateSocialContributions,
-  taxableWageIncome,
   calculateNetIncome,
   annualPersonTaxSummary,
   clampToAvailableTaxYear,
+  compareSeverancePaymentTiming,
 } from "@/lib/tax";
-import { calculateSeveranceNet } from "@/lib/tax/fuenftelregelung";
 import type { AnnualPersonTaxSummary, AnnualSeveranceTax } from "@/lib/tax";
 import {
   calculateSeverancePackage,
@@ -139,6 +137,18 @@ export type ScenarioPackageSummary = {
   netSeverance: number | null; // null when the member has no tax profile yet
   taxOnSeverance: number | null;
   taxSaving: number | null;
+  /** Effective payment date used for the tax-year calc — the package's own
+   *  severance_payment_date if set, else gardenLeaveEndDate below (payment
+   *  assumed to land the same month the lump sum becomes available). */
+  paymentDate: string;
+  /** How much tax paymentDate's timing saves (positive) or costs (negative)
+   *  vs. the other side of the calendar-year boundary — see
+   *  `lib/tax/fuenftelregelung.ts`'s `compareSeverancePaymentTiming`. Null
+   *  when there's no tax profile yet. */
+  paymentTimingTaxSaving: number | null;
+  /** True when paymentDate's year is after the year employment/garden leave
+   *  ends — the usual reason paymentTimingTaxSaving is positive. */
+  paidAfterEmploymentEnds: boolean;
   gardenLeaveNetMonthly: number | null;
   hasTaxProfile: boolean;
   /** Notice period's actual end (severance start + notice_period_months) —
@@ -281,34 +291,40 @@ export async function resolveScenario(
   const packageSummaries: ScenarioPackageSummary[] = packages.map((pkg) => {
     const memberTaxProfile = taxProfileByMember.get(pkg.household_member_id);
     const packageResult = calculateSeverancePackage(pkg);
+
+    // Work-end date (garden leave/notice) — computed before the tax block
+    // since the payment-date fallback below needs it.
+    const naturalAlgStart = pkg.include_garden_leave
+      ? addMonths(pkg.severance_start_date, Math.round(pkg.notice_period_months ?? 0))
+      : pkg.severance_start_date;
+
+    // The payment date only matters for *which tax year* the Fünftelregelung
+    // calc uses — everything else (garden leave, ALG I, health-insurance
+    // cutoffs) stays anchored to naturalAlgStart/severance_start_date.
+    const paymentDate = pkg.severance_payment_date || naturalAlgStart;
+    const departureYear = Number(naturalAlgStart.slice(0, 4));
+    const paymentYear = Number(paymentDate.slice(0, 4));
+
     let netSeverance: number | null = null;
     let taxOnSeverance: number | null = null;
     let taxSaving: number | null = null;
+    let paymentTimingTaxSaving: number | null = null;
     let gardenLeaveNetMonthly: number | null = null;
 
     if (memberTaxProfile) {
-      const grossAnnual =
-        (pkg.monthly_base_salary ?? 0) * 12 +
-        pkg.annual_bonus +
-        (nonSalaryAnnualGrossByMember.get(pkg.household_member_id) ?? 0);
-      const socialContribsAnnual =
-        calculateSocialContributions(pkg.monthly_base_salary ?? 0, memberTaxProfile, taxYear).total *
-        12;
-      const regularTaxableIncome = taxableWageIncome(
-        grossAnnual,
-        socialContribsAnnual,
-        memberTaxProfile,
-        taxYear
-      );
-      const severanceResult = calculateSeveranceNet(
+      const timing = compareSeverancePaymentTiming(
         packageResult.severanceGross,
-        regularTaxableIncome,
+        pkg.monthly_base_salary ?? 0,
+        pkg.annual_bonus,
+        nonSalaryAnnualGrossByMember.get(pkg.household_member_id) ?? 0,
         memberTaxProfile,
-        taxYear
+        departureYear,
+        paymentYear
       );
-      netSeverance = severanceResult.netSeverance;
-      taxOnSeverance = severanceResult.totalTaxOnSeverance;
-      taxSaving = severanceResult.taxSaving;
+      netSeverance = timing.actual.netSeverance;
+      taxOnSeverance = timing.actual.totalTaxOnSeverance;
+      taxSaving = timing.actual.taxSaving;
+      paymentTimingTaxSaving = timing.timingTaxSaving;
 
       if (pkg.include_garden_leave) {
         gardenLeaveNetMonthly = calculateNetIncome(
@@ -334,9 +350,6 @@ export async function resolveScenario(
 
     const sperrzeit = assessSperrzeitRisk(pkg, packageResult.severanceGross);
 
-    const naturalAlgStart = pkg.include_garden_leave
-      ? addMonths(pkg.severance_start_date, Math.round(pkg.notice_period_months ?? 0))
-      : pkg.severance_start_date;
     const deferredAlgStart = addMonths(naturalAlgStart, Math.round(pkg.unemployment_benefit_defer_months));
     // Sperrzeit shifts the claim start additively on top of any manual
     // deferral (deliberately conservative — see DESIGN v2 §7 for why this
@@ -361,6 +374,9 @@ export async function resolveScenario(
       netSeverance,
       taxOnSeverance,
       taxSaving,
+      paymentDate,
+      paymentTimingTaxSaving,
+      paidAfterEmploymentEnds: paymentYear > departureYear,
       gardenLeaveNetMonthly,
       hasTaxProfile: !!memberTaxProfile,
       gardenLeaveEndDate: naturalAlgStart,
@@ -580,7 +596,9 @@ export async function resolveScenario(
  * regular income (salary/rental/garden leave/…) via
  * `aggregateAnnualIncomeByMember`, one severance lump sum segment per
  * (person, year) reused as-is from `packageSummaries` (its own
- * Fünftelregelung figures, not retaxed here). Takes the already-projected
+ * Fünftelregelung figures, not retaxed here — already computed against
+ * `paymentDate`'s own year, which is also the year this bucketing uses).
+ * Takes the already-projected
  * `runway` rather than a scenario, since the page computes that once via
  * `projectRunway` and both the Cash Flow chart and this need the same run.
  *
@@ -605,7 +623,9 @@ export function buildAnnualTaxSummaries(
   const severanceByKey = new Map<string, AnnualSeveranceTax>();
   for (const s of packageSummaries) {
     if (s.netSeverance == null) continue; // no tax profile — nothing to attribute yet
-    const year = Number(s.gardenLeaveEndDate.slice(0, 4));
+    // Taxed in the year it's actually received, not necessarily the year
+    // employment ends — see `paymentDate`'s own comment.
+    const year = Number(s.paymentDate.slice(0, 4));
     const key = `${s.package.household_member_id}::${year}`;
     const existing = severanceByKey.get(key) ?? { gross: 0, totalTax: 0, net: 0 };
     severanceByKey.set(key, {

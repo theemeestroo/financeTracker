@@ -270,7 +270,18 @@ export type SeveranceScenarioPackage = {
   include_garden_leave: boolean;
   notice_period_months: number | null;
   gross_severance_override: number | null;
+  /** The *work end date* — when employment/notice ends. Drives garden
+   *  leave, ALG I timing, and the salary/health-insurance cutoffs. Despite
+   *  the name, this is not necessarily when the lump sum is paid — see
+   *  `severance_payment_date`. */
   severance_start_date: string;
+  /** When the severance lump sum is actually paid, if known — supersedes
+   *  `severance_start_date`'s own landing date (garden leave end) purely
+   *  for picking which calendar year the Fünftelregelung tax calc uses
+   *  (`lib/tax/fuenftelregelung.ts`'s `compareSeverancePaymentTiming`).
+   *  Null means "not set separately" — the app assumes the payment lands
+   *  the same month garden leave ends, same as before this field existed. */
+  severance_payment_date: string | null;
   christmas_bonus_pct: number | null;
   include_christmas_bonus_in_calc: boolean;
   claim_unemployment_benefit: boolean;

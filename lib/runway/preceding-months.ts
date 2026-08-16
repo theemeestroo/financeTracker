@@ -4,12 +4,15 @@ import type { ResolvedSeveranceScenario, RunwayPoint } from "./types";
 
 /**
  * Synthesizes `RunwayPoint`s for the months *before* `projectRunway`'s own
- * start month, back to January 1 of that same calendar year — a severance
+ * start month — back to January 1 of that same calendar year, or 3 months
+ * before the start, whichever is earlier (so an early-year severance, e.g.
+ * February, still gets a real 3-month runway lead-in instead of just
+ * January, reaching into the previous calendar year if needed). A severance
  * starting mid-year (say, April) means the real projection only covers
  * April onward (deliberately: the balance projection starts exactly at the
  * severance event, not before), but both (a) the Cash Flow tab's own chart
  * and month-breakdown table, and (b) the Tax tab's per-year totals, are
- * more useful showing the household's actual full year.
+ * more useful showing the household's actual run-up to it.
  *
  * Uses the same per-phase income/commitment logic the real projection uses
  * (`activeProfileFor`/`monthlyIncomeItems`/`monthlyCommitmentItems`, all
@@ -23,7 +26,7 @@ import type { ResolvedSeveranceScenario, RunwayPoint } from "./types";
  * closing balance of the month immediately before it — rather than assumed
  * to be 0 or the same figure repeated: each earlier month's own closing
  * balance is `the next month's closing balance minus that next month's own
- * delta`, walking back to January.
+ * delta`, walking back from the start.
  */
 export function precedingMonthsSeries(scenario: ResolvedSeveranceScenario): RunwayPoint[] {
   if (scenario.phases.length === 0 || scenario.severances.length === 0) return [];
@@ -34,11 +37,13 @@ export function precedingMonthsSeries(scenario: ResolvedSeveranceScenario): Runw
       scenario.severances[0].severanceStartDate
     )
   );
-  const yearStart = `${runwayStartMonth.slice(0, 4)}-01-01`;
-  if (yearStart >= runwayStartMonth) return [];
+  const calendarYearStart = `${runwayStartMonth.slice(0, 4)}-01-01`;
+  const threeMonthsBefore = addMonths(runwayStartMonth, -3);
+  const backfillStart = threeMonthsBefore < calendarYearStart ? threeMonthsBefore : calendarYearStart;
+  if (backfillStart >= runwayStartMonth) return [];
 
   const months: string[] = [];
-  for (let date = yearStart; date < runwayStartMonth; date = addMonths(date, 1)) {
+  for (let date = backfillStart; date < runwayStartMonth; date = addMonths(date, 1)) {
     months.push(date);
   }
 

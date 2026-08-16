@@ -201,6 +201,14 @@ export const HELP_ARTICLES: HelpArticle[] = [
         type: "p",
         text: "Garden leave models a notice period (in months) during which the package holder keeps receiving net salary before the severance lump sum and any unemployment benefit begin. The net severance lump sum itself is computed using Fünftelregelung (§34 EStG) — Germany's rule for taxing a one-time lump sum without pushing all of it into the top bracket — see Concepts & disclaimers.",
       },
+      {
+        type: "p",
+        text: "\"Work end date\" and \"Severance payment date\" are separate fields, because they often are in real life. Work end date drives garden leave, ALG I timing, and notice pay — it's when employment actually ends. Severance payment date is purely about tax: German severance is taxed in the calendar year it's received, so paying it in a later tax year — once salary has stopped for the year — can meaningfully lower the tax owed on it, versus taking it immediately. Leave the payment date blank to assume it lands the same month garden leave ends (today's default assumption).",
+      },
+      {
+        type: "p",
+        text: "Whenever the chosen payment date makes a real difference, the package card shows a \"Payment timing\" callout: a confirmed saving (green) when the payment already lands in a later tax year than employment ends, or a suggestion (amber) — \"delaying to January <year> could save €X more\" — when it's still scheduled within the departure year. The figure compares the two sides of that calendar-year boundary directly, so it's specific to your own numbers, not a generic rule of thumb.",
+      },
       { type: "p", text: "The employment start date also drives a pension Wartezeit view — a timeline of departure-timing options around Germany's 5-year statutory pension qualifying period." },
     ],
   },
@@ -240,7 +248,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
     blocks: [
       {
         type: "p",
-        text: "The Cash Flow tab projects the household's balance forward month by month — garden leave pay, the severance lump sum, ALG I, health insurance, ordinary commitments and income, cost-phase changes, and one-off events, all combined. It reports the depletion date (the first month the balance goes negative, if ever, within a 10-year horizon) and the lowest balance point reached. If your household's own current liquid savings are set on the baseline Living Profile, a dashed 'do-nothing' line overlays the same chart — today's surplus or deficit held flat, for comparison against actually taking the severance.",
+        text: "The Cash Flow tab projects the household's balance forward month by month — garden leave pay, the severance lump sum, ALG I, health insurance, ordinary commitments and income, cost-phase changes, and one-off events, all combined. It reports the depletion date (the first month the balance goes negative, if ever, within a 10-year horizon) and the lowest balance point reached. The chart and its month-breakdown table always show at least 3 months' lead-in before the severance event (more if it starts later in the calendar year, back to January 1st), so there's real context before the transition, not just a single month. If your household's own current liquid savings are set on the baseline Living Profile, a dashed 'do-nothing' line overlays the same chart — today's surplus or deficit held flat, for comparison against actually taking the severance.",
       },
       {
         type: "p",

@@ -309,13 +309,31 @@ export function PackageForm({
         </div>
       </div>
 
-      <div className="flex flex-col gap-1.5 max-w-64">
-        <Label htmlFor="severance_start_date">Severance start date</Label>
-        <DatePicker
-          id="severance_start_date"
-          name="severance_start_date"
-          defaultValue={defaultValues?.severance_start_date}
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="severance_start_date">Work end date</Label>
+          <DatePicker
+            id="severance_start_date"
+            name="severance_start_date"
+            defaultValue={defaultValues?.severance_start_date}
+          />
+          <span className="text-xs text-muted-foreground">
+            When employment/notice ends — drives garden leave, ALG I timing, and notice pay
+          </span>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="severance_payment_date">Severance payment date (optional)</Label>
+          <DatePicker
+            id="severance_payment_date"
+            name="severance_payment_date"
+            defaultValue={defaultValues?.severance_payment_date ?? undefined}
+          />
+          <span className="text-xs text-muted-foreground">
+            When the lump sum is actually paid, if different — severance is taxed in the year it&apos;s
+            received, so paying in a later tax year (e.g. once salary has stopped) can lower the tax
+            owed. Leave blank to assume it lands when garden leave ends.
+          </span>
+        </div>
       </div>
 
       <div className="rounded-lg border p-4">
