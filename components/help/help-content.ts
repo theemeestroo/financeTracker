@@ -203,7 +203,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "\"Work end date\" and \"Severance payment date\" are separate fields, because they often are in real life. Work end date drives garden leave, ALG I timing, and notice pay — it's when employment actually ends. Severance payment date is purely about tax: German severance is taxed in the calendar year it's received, so paying it in a later tax year — once salary has stopped for the year — can meaningfully lower the tax owed on it, versus taking it immediately. Leave the payment date blank to assume it lands the same month garden leave ends (today's default assumption).",
+        text: "\"Work end date\" and \"Severance payment date\" are separate fields, because they often are in real life. Work end date drives garden leave, ALG I timing, and notice pay — it's when employment actually ends. Severance payment date is about both tax and cash flow: German severance is taxed in the calendar year it's received, so paying it in a later tax year — once salary has stopped for the year — can meaningfully lower the tax owed on it, versus taking it immediately; and the projected balance chart moves the lump sum to land exactly on that date too, instead of assuming it arrives the moment garden leave ends. Leave the payment date blank to assume it lands the same month garden leave ends (today's default assumption).",
       },
       {
         type: "p",
@@ -248,7 +248,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
     blocks: [
       {
         type: "p",
-        text: "The Cash Flow tab projects the household's balance forward month by month — garden leave pay, the severance lump sum, ALG I, health insurance, ordinary commitments and income, cost-phase changes, and one-off events, all combined. It reports the depletion date (the first month the balance goes negative, if ever, within a 10-year horizon) and the lowest balance point reached. The chart and its month-breakdown table always show at least 3 months' lead-in before the severance event (more if it starts later in the calendar year, back to January 1st), so there's real context before the transition, not just a single month. If your household's own current liquid savings are set on the baseline Living Profile, a dashed 'do-nothing' line overlays the same chart — today's surplus or deficit held flat, for comparison against actually taking the severance.",
+        text: "The Cash Flow tab projects the household's balance forward month by month — garden leave pay, the severance lump sum, ALG I, health insurance, ordinary commitments and income, cost-phase changes, and one-off events, all combined. It reports the depletion date (the first month the balance goes negative, if ever, within a 10-year horizon) and the lowest balance point reached. The chart and its month-breakdown table start from today's calendar month and run through the severance event, so you see the household's real run-up to it rather than just the months from the severance event onward. If your household's own current liquid savings are set on the baseline Living Profile, a dashed 'do-nothing' line overlays the same chart — today's surplus or deficit held flat, for comparison against actually taking the severance.",
       },
       {
         type: "p",
@@ -256,7 +256,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "If a severance starts partway through the year (say, April), the chart and breakdown table also show January through March — the household's ordinary income and costs before the severance itself begins — so you can see the whole calendar year at a glance, not just the months from the severance event onward. The depletion date and lowest balance figures stay based on the severance scenario itself, though, not these extra lead-in months.",
+        text: "If a severance is still months (or years) away, the chart and breakdown table also show every month between today and the severance event — the household's ordinary income and costs before the severance itself begins — so you can see the whole run-up at a glance, not just the months from the severance event onward. The depletion date and lowest balance figures stay based on the severance scenario itself, though, not these extra lead-in months.",
       },
     ],
   },

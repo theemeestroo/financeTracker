@@ -137,9 +137,10 @@ export type ScenarioPackageSummary = {
   netSeverance: number | null; // null when the member has no tax profile yet
   taxOnSeverance: number | null;
   taxSaving: number | null;
-  /** Effective payment date used for the tax-year calc — the package's own
-   *  severance_payment_date if set, else gardenLeaveEndDate below (payment
-   *  assumed to land the same month the lump sum becomes available). */
+  /** Effective payment date — the package's own severance_payment_date if
+   *  set, else gardenLeaveEndDate below. Drives both which tax year the
+   *  Fünftelregelung calc uses *and* which month the projection actually
+   *  lands the lump sum in (see runwayScenario.severances). */
   paymentDate: string;
   /** How much tax paymentDate's timing saves (positive) or costs (negative)
    *  vs. the other side of the calendar-year boundary — see
@@ -298,9 +299,12 @@ export async function resolveScenario(
       ? addMonths(pkg.severance_start_date, Math.round(pkg.notice_period_months ?? 0))
       : pkg.severance_start_date;
 
-    // The payment date only matters for *which tax year* the Fünftelregelung
-    // calc uses — everything else (garden leave, ALG I, health-insurance
-    // cutoffs) stays anchored to naturalAlgStart/severance_start_date.
+    // The payment date drives which tax year the Fünftelregelung calc uses
+    // below, and (via runwayScenario.severances further down) which month
+    // the lump sum itself lands in the balance projection — garden leave
+    // pay, ALG I, and health-insurance cutoffs all stay anchored to
+    // naturalAlgStart/severance_start_date regardless, since those are
+    // about employment ending, not about when the money is paid.
     const paymentDate = pkg.severance_payment_date || naturalAlgStart;
     const departureYear = Number(naturalAlgStart.slice(0, 4));
     const paymentYear = Number(paymentDate.slice(0, 4));
@@ -506,11 +510,12 @@ export async function resolveScenario(
   // convention as netSeveranceLumpSum below) into a flat EUR principal,
   // which then compounds forward as its own segregated pot independent of
   // the household's running balance (see lib/runway/savings.ts), anchored
-  // to the same gardenLeaveEndDate the health-insurance cutoff above uses —
-  // the month the lump sum actually lands. Scenario-scoped rows validate
-  // against their own package directly; global rows (see global-items.ts)
-  // resolve against *this scenario's* package for the rule's household
-  // member, with any scenario-local override already folded in.
+  // to the same paymentDate the projection itself lands the lump sum at —
+  // money can't start compounding before it's actually received. Scenario-
+  // scoped rows validate against their own package directly; global rows
+  // (see global-items.ts) resolve against *this scenario's* package for the
+  // rule's household member, with any scenario-local override already
+  // folded in.
   const packageSummaryById = new Map(packageSummaries.map((s) => [s.package.id, s]));
   const packageIdByMember = new Map(packageSummaries.map((s) => [s.package.household_member_id, s.package.id]));
   const mergedSavingsRules = mergeScenarioSavingsRules(
@@ -533,7 +538,7 @@ export async function resolveScenario(
         principal,
         annualReturnPct: rule.annual_return_pct,
         accrualFrequency: rule.accrual_frequency,
-        startMonth: summary.gardenLeaveEndDate,
+        startMonth: summary.paymentDate,
       } satisfies ResolvedSavingsRule;
     })
     .filter((r): r is ResolvedSavingsRule => r !== null);
@@ -547,6 +552,7 @@ export async function resolveScenario(
     gardenLeaveNetMonthly: s.gardenLeaveNetMonthly ?? s.package.monthly_base_salary ?? 0,
     gardenLeaveGrossMonthly: s.package.monthly_base_salary ?? 0,
     netSeveranceLumpSum: s.netSeverance ?? s.severanceGross,
+    severancePaymentDate: s.paymentDate,
     algMonthlyNet: s.algMonthlyNet,
     algStartDate: s.algStartDate,
     algEndDate: s.algEndDate,

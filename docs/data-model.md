@@ -212,7 +212,7 @@ One row per household member taking severance within a scenario — the per-pers
 | `notice_period_months` | numeric(4,1) | nullable | `6` | garden-leave duration |
 | `gross_severance_override` | numeric(10,2) | nullable | — | manual override of the computed gross severance |
 | `severance_start_date` | date | not null | — | the *work end date* — drives garden leave, ALG I timing, notice pay; despite the name, not necessarily when the lump sum is paid — see `severance_payment_date` |
-| `severance_payment_date` | date | nullable | — | when the lump sum is actually paid, if different from when garden leave ends — supersedes it purely for picking which calendar year the Fünftelregelung tax calc uses (`lib/tax/fuenftelregelung.ts`'s `compareSeverancePaymentTiming`); null means "assume it lands when garden leave ends" |
+| `severance_payment_date` | date | nullable | — | when the lump sum is actually paid, if different from when garden leave ends — drives both which calendar year the Fünftelregelung tax calc uses (`lib/tax/fuenftelregelung.ts`'s `compareSeverancePaymentTiming`) and which month `projectRunway` lands the lump sum in; null means "assume it lands when garden leave ends" (today's only behavior before this column existed) |
 | `claim_unemployment_benefit` | boolean | not null | `true` | whether this package's holder claims ALG I |
 | `unemployment_benefit_defer_months` | numeric(4,1) | not null | `0` | deferred ALG I claim start |
 | `months_insured_override` | numeric(4,1) | nullable | — | overrides the insured-months figure feeding ALG I duration |

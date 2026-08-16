@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { precedingMonthsSeries } from "./preceding-months";
 import type { Split } from "@/lib/finance/splits";
 import type { Commitment, Income, TaxProfile } from "@/lib/types";
@@ -69,6 +69,7 @@ function stream(overrides: Partial<SeveranceStream>): SeveranceStream {
     gardenLeaveNetMonthly: 0,
     gardenLeaveGrossMonthly: 0,
     netSeveranceLumpSum: 0,
+    severancePaymentDate: "2027-04-15",
     algMonthlyNet: 0,
     algStartDate: "2027-04-15",
     algEndDate: "2027-04-15",
@@ -95,7 +96,16 @@ const baseScenario: ResolvedSeveranceScenario = {
 };
 
 describe("precedingMonthsSeries", () => {
-  it("backfills January through the month before a mid-year severance start", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2027-01-10T12:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("backfills from today through the month before a mid-year severance start", () => {
     const points = precedingMonthsSeries(baseScenario);
     expect(points.map((p) => p.date)).toEqual(["2027-01-01", "2027-02-01", "2027-03-01"]);
   });
@@ -135,30 +145,24 @@ describe("precedingMonthsSeries", () => {
     expect(feb.balance + marDelta).toBeCloseTo(mar.balance, 5);
   });
 
-  it("reaches back into the previous calendar year to guarantee at least 3 months when the severance starts in January", () => {
-    const points = precedingMonthsSeries({
-      ...baseScenario,
-      severances: [stream({ severanceStartDate: "2027-01-01" })],
-    });
-    expect(points.map((p) => p.date)).toEqual(["2026-10-01", "2026-11-01", "2026-12-01"]);
+  it("returns nothing when today is already at or past the severance start", () => {
+    vi.setSystemTime(new Date("2027-04-15T12:00:00Z"));
+    const points = precedingMonthsSeries(baseScenario);
+    expect(points).toEqual([]);
   });
 
-  it("reaches back into the previous calendar year when the severance starts in February (only 1 month left in the new year otherwise)", () => {
-    const points = precedingMonthsSeries({
-      ...baseScenario,
-      severances: [stream({ severanceStartDate: "2027-02-01" })],
-    });
-    expect(points.map((p) => p.date)).toEqual(["2026-11-01", "2026-12-01", "2027-01-01"]);
+  it("returns nothing when today is after the severance start", () => {
+    vi.setSystemTime(new Date("2027-06-01T12:00:00Z"));
+    const points = precedingMonthsSeries(baseScenario);
+    expect(points).toEqual([]);
   });
 
-  it("still shows the whole calendar year when that's already more than 3 months (unchanged from before)", () => {
-    const points = precedingMonthsSeries({
-      ...baseScenario,
-      severances: [stream({ severanceStartDate: "2027-10-01" })],
-    });
+  it("reaches back further than 3 months, and across calendar years, when the severance is planned well in advance", () => {
+    vi.setSystemTime(new Date("2026-10-05T12:00:00Z"));
+    const points = precedingMonthsSeries(baseScenario);
     expect(points.map((p) => p.date)).toEqual([
-      "2027-01-01", "2027-02-01", "2027-03-01", "2027-04-01", "2027-05-01",
-      "2027-06-01", "2027-07-01", "2027-08-01", "2027-09-01",
+      "2026-10-01", "2026-11-01", "2026-12-01",
+      "2027-01-01", "2027-02-01", "2027-03-01",
     ]);
   });
 

@@ -499,7 +499,7 @@ export default async function ScenarioDetailPage({
                 // severance (rather than the household's combined balance,
                 // which could include another person's much larger package)
                 // keeps it a genuinely per-person figure.
-                const lumpSumMonth = firstOfMonth(packageSummary.gardenLeaveEndDate);
+                const lumpSumMonth = firstOfMonth(packageSummary.paymentDate);
                 const algEndMonth = firstOfMonth(packageSummary.algEndDate);
                 const lumpSumBalance = runway?.series.find((p) => p.date === lumpSumMonth)?.balance ?? null;
                 const algEndBalance = runway?.series.find((p) => p.date === algEndMonth)?.balance ?? null;
@@ -844,7 +844,7 @@ export default async function ScenarioDetailPage({
                             s.netSeverance != null
                               ? formatEUR(s.netSeverance)
                               : `${formatEUR(s.severanceGross)} gross`,
-                          from: formatDateDisplay(gardenLeaveEnd ?? pkg.severance_start_date),
+                          from: formatDateDisplay(s.paymentDate),
                           to: "—",
                         });
                         if (s.algMonthlyNet > 0) {

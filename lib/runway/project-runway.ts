@@ -18,8 +18,10 @@ const DEFAULT_HORIZON_MONTHS = 120;
  *
  * Walks forward from the earliest severance stream's start date. Each stream
  * (one per person taking severance) contributes garden-leave pay for its own
- * notice window, then its own net severance lump sum when that ends —
- * streams run independently and simply sum together. Every month, whichever
+ * notice window, then its own net severance lump sum at its own payment
+ * month (`severancePaymentDate` — defaults to the same month garden leave
+ * ends, but can land later when set separately, e.g. for a tax-year timing
+ * choice) — streams run independently and simply sum together. Every month, whichever
  * phase's `startDate` is the most recent one at or before that month
  * supplies the active commitments/income — a wholesale profile swap, not an
  * incremental diff. One-off commitments and scenario events land in their
@@ -51,16 +53,28 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
     gardenLeaveEndMonth: s.includeGardenLeave
       ? addMonths(firstOfMonth(s.severanceStartDate), Math.round(s.noticePeriodMonths))
       : firstOfMonth(s.severanceStartDate),
+    // Where the lump sum itself lands — independent of gardenLeaveEndMonth
+    // above, which still governs garden leave pay/ALG I/health-insurance
+    // timing regardless of when the money is actually paid.
+    paymentMonth: firstOfMonth(s.severancePaymentDate),
     algStartMonth: firstOfMonth(s.algStartDate),
     algEndMonth: firstOfMonth(s.algEndDate),
     newJobStartMonth: s.newJobStartDate ? firstOfMonth(s.newJobStartDate) : null,
   }));
 
   let balance = scenario.startingBalance;
-  // Each savings rule's own segregated pot, seeded from its resolved
-  // principal — compounds on its own gross accrual, independent of
-  // `balance` above (see ResolvedSavingsRule's own comment for why).
-  const pots = new Map(scenario.savingsRules.map((rule) => [rule.id, rule.principal]));
+  // Each savings rule's own segregated pot — seeded from its resolved
+  // principal the moment its own `startMonth` arrives, not before (the
+  // money isn't invested until the severance lump sum it comes from has
+  // actually landed in `balance`) — then compounds on its own gross
+  // accrual, independent of `balance` above (see ResolvedSavingsRule's own
+  // comment for why). Seeding eagerly here would let an unfunded rule's
+  // full principal count toward `totalPots` below for months before its
+  // money exists, which — since real `balance` hasn't received that
+  // severance yet either — would trip the "shrink pots to fit the real
+  // balance" safeguard immediately and permanently, even though nothing
+  // was ever actually overspent.
+  const pots = new Map<string, number>();
   const series: RunwayPoint[] = [];
   let depletionDate: string | null = null;
   let lowestBalance = Infinity;
@@ -95,7 +109,7 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
           grossAmount: stream.gardenLeaveGrossMonthly,
         });
       }
-      if (date === stream.gardenLeaveEndMonth) {
+      if (date === stream.paymentMonth) {
         items.push({
           label: `${stream.householdMemberName} — severance lump sum (net)`,
           amount: stream.netSeveranceLumpSum,
@@ -159,6 +173,7 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
     // by its own prior periods' gross return) — not `balance` above, so
     // this month's other income/commitments/lump sums never feed into it.
     for (const rule of scenario.savingsRules) {
+      if (date >= rule.startMonth && !pots.has(rule.id)) pots.set(rule.id, rule.principal);
       if (!isAccrualMonth(rule, date)) continue;
       const potBalance = pots.get(rule.id) ?? rule.principal;
       const grossAccrued = periodicAccrual(rule, potBalance);

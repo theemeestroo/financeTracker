@@ -33,6 +33,7 @@ function scenario(
         gardenLeaveNetMonthly: 0,
         gardenLeaveGrossMonthly: 0,
         netSeveranceLumpSum,
+        severancePaymentDate: "2027-01-01",
         algMonthlyNet: 0,
         algStartDate: "2027-01-01",
         algEndDate: "2027-01-01",

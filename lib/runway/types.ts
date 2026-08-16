@@ -40,6 +40,14 @@ export type SeveranceStream = {
   gardenLeaveNetMonthly: number;
   /** Net severance (after tax) only — the scenario's starting balance is applied separately. */
   netSeveranceLumpSum: number;
+  /** The month the lump sum actually lands in the balance — the package's
+   *  own `severance_payment_date` if set, else the same month garden leave
+   *  ends (i.e. `severanceStartDate` + `noticePeriodMonths`, or just
+   *  `severanceStartDate` with no garden leave). Always resolved to a
+   *  concrete date by the caller — never null. Garden leave pay/ALG
+   *  I/health-insurance timing are unaffected by this; only the lump sum
+   *  itself moves. */
+  severancePaymentDate: string;
   /** ALG I monthly net amount; 0 when not eligible/not claiming. */
   algMonthlyNet: number;
   /** Natural claim start (garden-leave end, or severance start) plus any deferral. Ignored when algMonthlyNet is 0. */

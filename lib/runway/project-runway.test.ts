@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { calculateCapitalGainsTax } from "@/lib/tax";
+import { addMonths } from "@/lib/finance/date-utils";
 import { projectRunway } from "./project-runway";
 import type { Split } from "@/lib/finance/splits";
 import type { Commitment, Income, TaxProfile } from "@/lib/types";
@@ -60,16 +61,26 @@ function income(overrides: Partial<Income> & { splits?: Split[] }): ResolvedInco
   };
 }
 
-function stream(overrides: Partial<SeveranceStream>): SeveranceStream {
+function stream(overrides: Partial<SeveranceStream> = {}): SeveranceStream {
+  const severanceStartDate = overrides.severanceStartDate ?? "2026-01-01";
+  const includeGardenLeave = overrides.includeGardenLeave ?? false;
+  const noticePeriodMonths = overrides.noticePeriodMonths ?? 0;
+  // Same "no separate payment date" fallback resolve-scenario.ts uses —
+  // lands the lump sum the same month garden leave ends, unless a test
+  // overrides severancePaymentDate explicitly.
+  const gardenLeaveEnd = includeGardenLeave
+    ? addMonths(severanceStartDate, Math.round(noticePeriodMonths))
+    : severanceStartDate;
   return {
     householdMemberId: "m1",
     householdMemberName: "Member",
-    severanceStartDate: "2026-01-01",
-    includeGardenLeave: false,
-    noticePeriodMonths: 0,
+    severanceStartDate,
+    includeGardenLeave,
+    noticePeriodMonths,
     gardenLeaveNetMonthly: 0,
     gardenLeaveGrossMonthly: 0,
     netSeveranceLumpSum: 0,
+    severancePaymentDate: gardenLeaveEnd,
     algMonthlyNet: 0,
     algStartDate: "2026-01-01",
     algEndDate: "2026-01-01",
@@ -131,6 +142,29 @@ describe("projectRunway — lump sum timing", () => {
     expect(result.series[1].balance).toBe(6000); // month 1: another month of garden leave pay
     expect(result.series[2].balance).toBe(16000); // month 2: garden leave ends, lump sum lands
     expect(result.series[3].balance).toBe(16000); // month 3: no further cash flow
+  });
+
+  it("lands the lump sum at severancePaymentDate, not gardenLeaveEndMonth, when they differ", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      severances: [
+        stream({
+          includeGardenLeave: true,
+          noticePeriodMonths: 2, // garden leave ends month 2
+          gardenLeaveNetMonthly: 3000,
+          netSeveranceLumpSum: 10000,
+          severancePaymentDate: "2026-06-01", // paid month 5 instead
+        }),
+      ],
+    });
+    // Garden leave pay still stops after month 1 (unaffected by the
+    // separate payment date) but the lump sum doesn't land yet.
+    expect(result.series[2].balance).toBe(6000);
+    expect(result.series[3].balance).toBe(6000);
+    expect(result.series[4].balance).toBe(6000);
+    // Month 5 (2026-06-01): the lump sum lands on its own schedule.
+    expect(result.series[5].date).toBe("2026-06-01");
+    expect(result.series[5].balance).toBe(16000);
   });
 });
 
@@ -548,6 +582,44 @@ describe("projectRunway — savings/investment rules", () => {
     expect(result.series[0].breakdown?.inflows).toEqual([]);
     expect(result.series[1].breakdown?.inflows).toEqual([]);
     expect(result.series[2].breakdown?.inflows).toHaveLength(1);
+  });
+
+  it("doesn't shrink a rule's pot for months before its own startMonth, even if its principal dwarfs the balance then", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 0,
+      severances: [
+        stream({
+          includeGardenLeave: true,
+          noticePeriodMonths: 2, // garden leave covers months 0-1; lump sum + rule both start month 2
+          gardenLeaveNetMonthly: 500, // tiny next to the pot's principal below
+          netSeveranceLumpSum: 100000,
+        }),
+      ],
+      savingsRules: [
+        savingsRule({ principal: 100000, annualReturnPct: 12, accrualFrequency: "monthly", startMonth: "2026-03-01" }),
+      ],
+      horizonMonths: 3,
+    });
+
+    // Months 0-1: only garden-leave pay exists — the pot's own principal
+    // (100000) dwarfs it, but the rule hasn't started yet, so it must not
+    // exist yet and must not falsely trip the "shrink pots to fit the real
+    // balance" safeguard against it.
+    expect(result.series[0].breakdown?.inflows.some((i) => i.label.includes("investment return"))).toBe(false);
+    expect(result.series[1].breakdown?.inflows.some((i) => i.label.includes("investment return"))).toBe(false);
+
+    // Month 2: the lump sum lands and the rule's own startMonth arrives in
+    // the same month — the pot is seeded fresh from its full 100000
+    // principal (never having been prematurely collapsed during months
+    // 0-1) and accrues a full month's return on it (12%/12 = 1% of 100000
+    // = 1000). This is the regression case: seeding pots eagerly at month
+    // 0 used to let an unfunded rule's principal be shrunk down to a
+    // sliver of itself before the severance was ever actually paid,
+    // permanently.
+    const accrual = result.series[2].breakdown?.inflows.find((i) => i.label.includes("investment return"));
+    expect(accrual?.amount).toBeCloseTo(1000, 5);
+    expect(result.series[2].balance).toBeCloseTo(500 + 500 + 100000 + 1000, 5);
   });
 
   it("sums multiple rules independently, each against its own principal, in the same month", () => {
