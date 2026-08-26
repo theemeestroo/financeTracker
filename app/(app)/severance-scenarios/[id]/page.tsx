@@ -32,17 +32,16 @@ import { deleteScenario } from "../actions";
 import { duplicateScenario } from "../duplicate-actions";
 import {
   projectRunway,
-  projectDoNothingBaseline,
   sensitivityAnalysis,
   precedingMonthsSeries,
   resolveSavingsPrincipal,
 } from "@/lib/runway";
-import { getBaselineRunwayInputs } from "@/lib/finance/baseline-profile";
 import {
   pensionWartezeitTimeline,
   mergeScenarioEvents,
   mergeScenarioPropertyEnds,
   mergeScenarioSavingsRules,
+  mergePhases,
 } from "@/lib/severance";
 import {
   addScenarioEvent,
@@ -51,7 +50,13 @@ import {
   clearEventOverride,
   duplicateGlobalEventIntoScenario,
 } from "../event-actions";
-import { addScenarioPhase, deleteScenarioPhase } from "../phase-actions";
+import {
+  addScenarioPhase,
+  deleteScenarioPhase,
+  setPhaseOverride,
+  clearPhaseOverride,
+  duplicateGlobalPhaseIntoScenario,
+} from "../phase-actions";
 import { addScenarioPackage, deleteScenarioPackage } from "../package-actions";
 import {
   addScenarioPropertyEnd,
@@ -106,11 +111,13 @@ import type {
   Property,
   ScenarioChecklistItem,
   SeveranceGlobalEventOverride,
+  SeveranceGlobalPhaseOverride,
   SeveranceGlobalPropertyEndOverride,
   SeveranceGlobalSavingsRuleOverride,
   SeveranceScenario,
   SeveranceScenarioEvent,
   SeveranceScenarioPackage,
+  SeveranceScenarioPhase,
   SeveranceScenarioPropertyEnd,
   SeveranceScenarioSavingsRule,
 } from "@/lib/types";
@@ -169,6 +176,8 @@ export default async function ScenarioDetailPage({
     { data: members },
     { data: profiles },
     { data: phaseRows },
+    { data: globalPhaseRows },
+    { data: phaseOverrideRows },
     { data: eventRows },
     { data: globalEventRows },
     { data: eventOverrideRows },
@@ -190,6 +199,12 @@ export default async function ScenarioDetailPage({
       .select("id, profile_id, start_date, label")
       .eq("scenario_id", id)
       .order("start_date"),
+    supabase
+      .from("severance_scenario_phases")
+      .select("id, profile_id, start_date, label")
+      .eq("scope", "global")
+      .order("start_date"),
+    supabase.from("severance_global_phase_overrides").select("*").eq("scenario_id", id),
     supabase.from("severance_scenario_events").select("*").eq("scenario_id", id).order("date"),
     supabase.from("severance_scenario_events").select("*").eq("scope", "global").order("date"),
     supabase.from("severance_global_event_overrides").select("*").eq("scenario_id", id),
@@ -246,21 +261,6 @@ export default async function ScenarioDetailPage({
       ? { ...runway, series: [...precedingMonthsSeries(runwayScenario), ...runway.series] }
       : runway;
 
-  // "Do-nothing" baseline overlay (DESIGN v2 §2.5) — the household's own
-  // current situation, independent of this (or any) scenario; only shown
-  // once current_liquid_savings is set on the baseline living profile.
-  // Spans the same (possibly backfilled) dates as displayRunway so the two
-  // lines overlay point-for-point rather than the baseline starting mid-chart.
-  const baselineInputs = await getBaselineRunwayInputs(supabase);
-  const baselineSeries =
-    displayRunway && baselineInputs.currentLiquidSavings != null
-      ? projectDoNothingBaseline(
-          displayRunway.series.map((p) => p.date),
-          baselineInputs.currentLiquidSavings,
-          baselineInputs.monthlySurplus
-        )
-      : undefined;
-
   // Runway sensitivity panel (DESIGN v2 §2.6) — [] when the scenario is
   // already sustainable within the horizon, same "nothing to add" reasoning
   // sensitivityAnalysis documents itself.
@@ -276,6 +276,17 @@ export default async function ScenarioDetailPage({
   // most interesting year tax-wise — falling back to the earliest year.
   const defaultTaxYear =
     annualTaxSummaries.find((s) => s.severance.gross > 0)?.year ?? taxYearsAvailable[0];
+
+  // Cost phases — same merge as mergedEvents/mergedPropertyEnds below, but
+  // only profile_id is ever overridden (start_date/label always come from
+  // the global row) — see mergePhases's own comment. Shared with
+  // resolve-scenario.ts's own merge so this table can never disagree with
+  // what actually fed the projection.
+  const mergedPhases = mergePhases(
+    (phaseRows ?? []) as SeveranceScenarioPhase[],
+    (globalPhaseRows ?? []) as SeveranceScenarioPhase[],
+    (phaseOverrideRows ?? []) as SeveranceGlobalPhaseOverride[]
+  ).sort((a, b) => (a.start_date < b.start_date ? -1 : a.start_date > b.start_date ? 1 : 0));
 
   // One-off events — this scenario's own rows merged with every applicable
   // global event (override-aware, "duplicate into this scenario" excluded)
@@ -350,6 +361,19 @@ export default async function ScenarioDetailPage({
     .map((p) => `${p.name} ${formatEUR(p.net)}`)
     .join(" · ");
 
+  // Same per-person split as netSeveranceByPerson above, but for the
+  // Runway status tile — each package's own household member's depletion
+  // date (RunwayResult.perMember), not the household total.
+  const depletionByPerson = packageSummaries
+    .map((s) => ({
+      name: memberById.get(s.package.household_member_id) ?? "—",
+      depletionDate:
+        runway?.perMember?.find((pm) => pm.householdMemberId === s.package.household_member_id)
+          ?.depletionDate ?? null,
+    }))
+    .map((p) => `${p.name} ${p.depletionDate ? formatDateDisplay(p.depletionDate) : "Sustainable"}`)
+    .join(" · ");
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
@@ -411,7 +435,13 @@ export default async function ScenarioDetailPage({
                     : "Sustainable"
                   : "—"
               }
-              sub={runway && !runway.depletionDate ? "10yr horizon" : undefined}
+              sub={
+                runway && packageSummaries.length > 1
+                  ? depletionByPerson
+                  : runway && !runway.depletionDate
+                    ? "10yr horizon"
+                    : undefined
+              }
               accent={runway?.depletionDate ? "var(--status-critical)" : "var(--status-good)"}
               valueColor={runway ? (runway.depletionDate ? "var(--status-critical)" : "var(--status-good)") : undefined}
             />
@@ -490,6 +520,9 @@ export default async function ScenarioDetailPage({
                   pkg.severance_start_date ?? todayISO()
                 );
                 const memberName = memberById.get(pkg.household_member_id) ?? "—";
+                const memberDepletionDate =
+                  runway?.perMember?.find((pm) => pm.householdMemberId === pkg.household_member_id)
+                    ?.depletionDate ?? null;
                 // This person's own net severance, carried forward by the
                 // household's *actual* projected cash-flow change from the
                 // month it landed to the month their ALG I runs out — "if
@@ -590,14 +623,15 @@ export default async function ScenarioDetailPage({
                           )}
                         </div>
                         <div>
-                          <div className="text-xs text-muted-foreground">Garden leave (gross)</div>
-                          <div className="text-2xl font-extrabold tabular-nums tracking-tight">
-                            {pkg.include_garden_leave ? formatEUR(packageSummary.noticePayGross) : "—"}
+                          <div className="text-xs text-muted-foreground">Depletion date</div>
+                          <div
+                            className="text-2xl font-extrabold tabular-nums tracking-tight"
+                            style={{ color: memberDepletionDate ? "var(--status-critical)" : "var(--status-good)" }}
+                          >
+                            {memberDepletionDate ? formatDateDisplay(memberDepletionDate) : "Sustainable"}
                           </div>
-                          {packageSummary.gardenLeaveNetMonthly != null && (
-                            <div className="text-xs text-muted-foreground">
-                              {formatEUR(packageSummary.gardenLeaveNetMonthly)}/mo net
-                            </div>
+                          {!memberDepletionDate && (
+                            <div className="text-xs text-muted-foreground">10yr horizon</div>
                           )}
                         </div>
                         <div>
@@ -788,17 +822,7 @@ export default async function ScenarioDetailPage({
                       Add a severance package to see the projection.
                     </p>
                   ) : (
-                    <>
-                      <RunwayProjection runway={displayRunway} baselineSeries={baselineSeries} />
-                      {!baselineSeries && (
-                        <p className="mt-4 text-xs text-muted-foreground">
-                          <Link href="/profiles" className="underline underline-offset-2">
-                            Set your current liquid savings
-                          </Link>{" "}
-                          on the baseline profile to overlay a &quot;do-nothing&quot; reference line.
-                        </p>
-                      )}
-                    </>
+                    <RunwayProjection runway={displayRunway} memberById={memberById} />
                   )}
                 </CardContent>
               </Card>
@@ -1319,38 +1343,95 @@ export default async function ScenarioDetailPage({
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
-                  {(phaseRows ?? []).length > 0 && (
+                  {mergedPhases.length > 0 && (
                     <Table aria-label="Scenario phases">
                       <TableHeader>
                         <TableRow>
                           <TableHead scope="col">From</TableHead>
                           <TableHead scope="col">Profile</TableHead>
                           <TableHead scope="col">Label</TableHead>
-                          <TableHead scope="col" className="w-12 text-right">
+                          <TableHead scope="col" className="w-56 text-right">
                             &nbsp;
                           </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {(phaseRows ?? []).map((phase) => (
+                        {mergedPhases.map((phase) => (
                           <TableRow key={phase.id}>
                             <TableCell className="tabular-nums">
                               {formatDateDisplay(phase.start_date)}
                             </TableCell>
                             <TableCell>
-                              <Link
-                                href={`/profiles/${phase.profile_id}`}
-                                className="underline underline-offset-2"
-                              >
-                                {profileById.get(phase.profile_id) ?? "—"}
-                              </Link>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {phase.scope === "global" ? (
+                                  <Link
+                                    href={`/global-rules/phases/${phase.id}/edit`}
+                                    className="underline underline-offset-2"
+                                  >
+                                    {profileById.get(phase.profile_id) ?? "—"}
+                                  </Link>
+                                ) : (
+                                  <Link
+                                    href={`/profiles/${phase.profile_id}`}
+                                    className="underline underline-offset-2"
+                                  >
+                                    {profileById.get(phase.profile_id) ?? "—"}
+                                  </Link>
+                                )}
+                                <Badge variant="outline" className="text-xs font-normal">
+                                  {phase.scope === "global" ? "Global" : "Scenario"}
+                                </Badge>
+                                {phase.isOverridden && (
+                                  <Badge variant="outline" className="text-xs font-normal">
+                                    Overridden here
+                                  </Badge>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell className="text-muted-foreground">{phase.label ?? "—"}</TableCell>
                             <TableCell className="text-right">
-                              <DeleteButton
-                                action={deleteScenarioPhase.bind(null, phase.id, id)}
-                                confirmMessage="Remove this phase?"
-                              />
+                              {phase.scope === "global" ? (
+                                <div className="flex justify-end gap-1.5">
+                                  {phase.isOverridden && (
+                                    <form action={clearPhaseOverride.bind(null, phase.id, id)}>
+                                      <Button
+                                        type="submit"
+                                        variant="ghost"
+                                        size="icon"
+                                        aria-label="Clear override"
+                                      >
+                                        <RotateCcw className="size-4" />
+                                      </Button>
+                                    </form>
+                                  )}
+                                  <OverridePopover
+                                    action={setPhaseOverride.bind(null, phase.id, id)}
+                                    currentValue={phase.profile_id}
+                                    field="profile_id"
+                                    type="select"
+                                    options={((profiles ?? []) as LivingProfile[]).map((p) => ({
+                                      value: p.id,
+                                      label: p.name,
+                                    }))}
+                                    label="Living Profile for this scenario"
+                                  />
+                                  <form action={duplicateGlobalPhaseIntoScenario.bind(null, phase.id, id)}>
+                                    <Button
+                                      type="submit"
+                                      variant="ghost"
+                                      size="icon"
+                                      aria-label="Duplicate into this scenario"
+                                    >
+                                      <CopyPlus className="size-4" />
+                                    </Button>
+                                  </form>
+                                </div>
+                              ) : (
+                                <DeleteButton
+                                  action={deleteScenarioPhase.bind(null, phase.id, id)}
+                                  confirmMessage="Remove this phase?"
+                                />
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1361,6 +1442,7 @@ export default async function ScenarioDetailPage({
                     <PhaseForm
                       action={addScenarioPhase.bind(null, id)}
                       profiles={(profiles ?? []) as LivingProfile[]}
+                      showScopeToggle
                     />
                   </AddDisclosure>
                 </CardContent>

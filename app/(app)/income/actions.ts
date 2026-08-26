@@ -187,6 +187,35 @@ export async function updateIncome(
   redirect("/income");
 }
 
+const AdjustAmountSchema = z.object({
+  gross_amount: z.coerce.number().positive({ message: "Amount must be greater than 0." }),
+});
+
+/** Adjusts just an income row's gross amount — the profile detail page's
+ *  control for moving a cloned row's value up/down from the
+ *  `baseline_gross_amount` it was cloned at, without touching any of its
+ *  other fields. */
+export async function adjustIncomeAmount(
+  id: string,
+  revalidateTarget: string,
+  _prevState: FormState,
+  formData: FormData
+): Promise<FormState> {
+  const validated = AdjustAmountSchema.safeParse({ gross_amount: formData.get("gross_amount") });
+  if (!validated.success) return { error: validated.error.issues[0].message };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("income")
+    .update({ gross_amount: validated.data.gross_amount })
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/income");
+  revalidatePath(revalidateTarget);
+}
+
 export async function deleteIncome(id: string, revalidateTarget = "/income") {
   const supabase = await createClient();
   await supabase.from("income").delete().eq("id", id);

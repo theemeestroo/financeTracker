@@ -43,6 +43,11 @@ export type Commitment = {
   start_date: string;
   end_date: string | null;
   property_id: string | null;
+  /** Snapshot of `amount` taken when this row was cloned into its profile
+   *  (see cloneLivingProfile) — null for a row created fresh rather than
+   *  cloned. Lets the profile detail page show how far `amount` has since
+   *  been adjusted up/down from that starting point. */
+  baseline_amount: number | null;
 };
 
 export type Property = {
@@ -168,6 +173,11 @@ export type Income = {
    *  rent, is what feeds gross/net income and gets taxed. Ignored for
    *  non-rental rows. */
   rental_overhead_pct: number;
+  /** Snapshot of `gross_amount` taken when this row was cloned into its
+   *  profile (see cloneLivingProfile) — null for a row created fresh rather
+   *  than cloned. Lets the profile detail page show how far `gross_amount`
+   *  has since been adjusted up/down from that starting point. */
+  baseline_gross_amount: number | null;
 };
 
 /** Same zero/one/many-row semantics as CommitmentSplit/PropertySplit: zero
@@ -390,9 +400,13 @@ export type SeveranceGlobalSavingsRuleOverride = {
   stale_since: string | null;
 };
 
+/** `scenario_id` is null exactly when `scope === "global"` — a global phase
+ *  switches every scenario's timeline to `profile_id` the same way, same
+ *  scope model as `SeveranceScenarioEvent`/`SeveranceScenarioPropertyEnd`. */
 export type SeveranceScenarioPhase = {
   id: string;
-  scenario_id: string;
+  scope: ScenarioItemScope;
+  scenario_id: string | null;
   profile_id: string;
   start_date: string;
   label: string | null;
@@ -423,6 +437,22 @@ export type SeveranceGlobalPropertyEndOverride = {
   global_property_end_id: string | null;
   scenario_id: string;
   end_date: string | null;
+  suppressed: boolean;
+  orphaned_item_name: string | null;
+  stale_since: string | null;
+};
+
+/** A per-scenario supersede of a global cost phase's own `profile_id` —
+ *  unlike the other three override types, `start_date`/`label` are never
+ *  overridden (a deliberate product decision), so there's no date/value
+ *  field here, just `profile_id`. `suppressed`/`global_phase_id`/
+ *  `orphaned_item_name`/`stale_since`: see `SeveranceGlobalPropertyEndOverride`'s
+ *  own comment — identical shape/semantics. */
+export type SeveranceGlobalPhaseOverride = {
+  id: string;
+  global_phase_id: string | null;
+  scenario_id: string;
+  profile_id: string | null;
   suppressed: boolean;
   orphaned_item_name: string | null;
   stale_since: string | null;

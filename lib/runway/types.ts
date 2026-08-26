@@ -5,8 +5,14 @@ import type { Commitment, Frequency, Income, TaxProfile } from "@/lib/types";
  *  second lookup map, since every consumer needs both at once. */
 export type ResolvedIncome = Income & { splits: Split[] };
 
+/** Same reasoning as `ResolvedIncome` — a commitment with its splits
+ *  embedded, so per-member attribution (the runway's per-person balance,
+ *  the cash-flow breakdown's shared/individual grouping) doesn't need a
+ *  second lookup. */
+export type ResolvedCommitment = Commitment & { splits: Split[] };
+
 export type ResolvedRunwayProfile = {
-  commitments: Commitment[];
+  commitments: ResolvedCommitment[];
   income: ResolvedIncome[];
 };
 
@@ -114,17 +120,31 @@ export type ResolvedSeveranceScenario = {
   taxYear: number;
   /** Months to project forward. Defaults to 120 (10 years). */
   horizonMonths?: number;
+  /** The whole household's roster — every member, not just those with a
+   *  severance package or their own income/commitments. Drives the
+   *  per-person balance (`RunwayPoint.balanceByMember`/`RunwayResult.perMember`):
+   *  the starting balance and any genuinely unattributed cost/income (a
+   *  general household item with no `commitment_splits`/`income_splits` row)
+   *  are divided evenly across this list. Omitted (or empty) skips
+   *  per-person tracking entirely — existing callers that don't pass it get
+   *  the same total-only projection as before. */
+  householdMemberIds?: string[];
 };
 
 export type RunwayLineItem = {
   label: string;
   /** Always a positive magnitude — which bucket (inflows/outflows) it's in carries the sign. */
   amount: number;
-  /** Who this line item belongs to — set only when unambiguous (income
-   *  shared across 2+ people, or household-level items like savings
-   *  accrual, are left unattributed). Used to attribute income to a
-   *  person's annual tax summary (lib/tax/annual-tax-summary.ts), not
-   *  shown directly in the cash-flow breakdown panel. */
+  /** Who this line item belongs to — set only when unambiguous (a
+   *  commitment/income row split across 2+ people, or a genuinely
+   *  household-level item like a one-off scenario event or savings accrual
+   *  with no member, is left unattributed). Used both to attribute income to
+   *  a person's annual tax summary (lib/tax/annual-tax-summary.ts) and to
+   *  group the cash-flow breakdown panel into "shared" vs. each person's own
+   *  items — an unattributed item still counts toward everyone's own
+   *  *balance* (see `memberDeltas` in lib/runway/monthly-items.ts and
+   *  RunwayPoint.balanceByMember below), just not toward any one person's
+   *  display line. */
   householdMemberId?: string;
   /** Gross equivalent of `amount` — undefined for outflows, tax-exempt
    *  income (see `taxExempt`), and income whose tax treatment is handled
@@ -161,6 +181,20 @@ export type RunwayPoint = {
   /** Itemized income/outgoings behind that month's balance change. Optional
    *  for the same reason as monthlyCost — plain {date,balance} callers skip it. */
   breakdown?: RunwayMonthBreakdown;
+  /** Each household member's own prorated running balance this month, keyed
+   *  by household_member_id — always sums to `balance` for the same point.
+   *  Present only when the scenario supplied `householdMemberIds`; a plain
+   *  object (not a Map) since this crosses into client components. */
+  balanceByMember?: Record<string, number>;
+};
+
+/** One member's own depletion status, mirroring the household-level fields
+ *  on `RunwayResult` but computed against their own prorated sub-balance
+ *  (`RunwayPoint.balanceByMember[householdMemberId]`) instead of the shared
+ *  total. */
+export type PerMemberRunway = {
+  householdMemberId: string;
+  depletionDate: string | null;
 };
 
 export type RunwayResult = {
@@ -168,4 +202,7 @@ export type RunwayResult = {
   depletionDate: string | null;
   lowestBalance: number;
   lowestBalanceDate: string | null;
+  /** One entry per `ResolvedSeveranceScenario.householdMemberIds` — absent
+   *  (or empty) exactly when that wasn't supplied. */
+  perMember?: PerMemberRunway[];
 };

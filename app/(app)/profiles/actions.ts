@@ -78,10 +78,60 @@ export async function cloneLivingProfile(
     return { error: profileError?.message ?? "Could not create profile." };
   }
 
+  // Clone properties (+ their ownership splits) first so cloned commitments
+  // below can be relinked to the new profile's own copies via propertyIdMap
+  // — otherwise every cloned commitment would silently lose its property_id.
+  const { data: sourceProperties } = await supabase
+    .from("properties")
+    .select("id, name, address, notes, end_date")
+    .eq("profile_id", sourceProfileId);
+
+  const propertyIdMap = new Map<string, string>();
+  if (sourceProperties && sourceProperties.length > 0) {
+    const { data: clonedProperties } = await supabase
+      .from("properties")
+      .insert(
+        sourceProperties.map((p) => ({
+          user_id: user.id,
+          profile_id: newProfile.id,
+          name: p.name,
+          address: p.address,
+          notes: p.notes,
+          end_date: p.end_date,
+        }))
+      )
+      .select("id");
+
+    if (clonedProperties) {
+      sourceProperties.forEach((p, i) => {
+        if (clonedProperties[i]?.id) propertyIdMap.set(p.id, clonedProperties[i].id);
+      });
+
+      const { data: propertySplits } = await supabase
+        .from("property_splits")
+        .select("property_id, household_member_id, percentage")
+        .in("property_id", sourceProperties.map((p) => p.id));
+
+      if (propertySplits && propertySplits.length > 0) {
+        const newPropertySplits = propertySplits
+          .filter((s) => propertyIdMap.get(s.property_id))
+          .map((s) => ({
+            user_id: user.id,
+            property_id: propertyIdMap.get(s.property_id)!,
+            household_member_id: s.household_member_id,
+            percentage: s.percentage,
+          }));
+        if (newPropertySplits.length > 0) {
+          await supabase.from("property_splits").insert(newPropertySplits);
+        }
+      }
+    }
+  }
+
   const [{ data: commitments }, { data: income }] = await Promise.all([
     supabase
       .from("commitments")
-      .select("id, name, category, amount, frequency, essential, start_date, end_date")
+      .select("id, name, category, amount, frequency, essential, start_date, end_date, property_id")
       .eq("profile_id", sourceProfileId),
     supabase
       .from("income")
@@ -105,6 +155,8 @@ export async function cloneLivingProfile(
           end_date: c.end_date,
           user_id: user.id,
           profile_id: newProfile.id,
+          baseline_amount: c.amount,
+          property_id: c.property_id ? propertyIdMap.get(c.property_id) ?? null : null,
         }))
       )
       .select("id");
@@ -155,6 +207,7 @@ export async function cloneLivingProfile(
           exchange_rate_to_eur: i.exchange_rate_to_eur,
           user_id: user.id,
           profile_id: newProfile.id,
+          baseline_gross_amount: i.gross_amount,
         }))
       )
       .select("id");

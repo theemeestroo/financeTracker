@@ -22,7 +22,7 @@ import { todayISO } from "@/lib/finance/dashboard";
 import { formatDateDisplay, isActiveOn } from "@/lib/finance/date-utils";
 import { healthInsuranceOutgoings } from "@/lib/finance/health-insurance-outgoing";
 import { COMMITMENT_CATEGORIES, COMMITMENT_FREQUENCIES } from "@/lib/types";
-import type { Commitment, CommitmentSplit, HouseholdMember, Property } from "@/lib/types";
+import type { Commitment, CommitmentCategory, CommitmentSplit, HouseholdMember, Property } from "@/lib/types";
 
 const categoryLabel = (v: string) =>
   COMMITMENT_CATEGORIES.find((c) => c.value === v)?.label ?? v;
@@ -137,8 +137,12 @@ export default async function CommitmentsPage({
     return sum + (isMemberFilter ? memberShareOfAmount(monthly, splits, owner!) : monthly);
   }, 0);
 
-  // Grouped by property (alphabetical), then a final "No property" group —
-  // costs within each group ordered biggest-first, same as everywhere else.
+  // Grouped by property (alphabetical), then every property-less commitment
+  // sub-grouped by category instead of one flat "No property" bucket — each
+  // category its own collapsible group, in the app's canonical category
+  // order (COMMITMENT_CATEGORIES), same "fixed enum, declared order" idiom
+  // income/page.tsx already uses for its own type-grouping. Costs within
+  // each group ordered biggest-first, same as everywhere else.
   const commitmentsByProperty = new Map<string, Commitment[]>();
   const unassigned: Commitment[] = [];
   for (const c of rows) {
@@ -151,6 +155,10 @@ export default async function CommitmentsPage({
       unassigned.push(c);
     }
   }
+  const unassignedByCategory = new Map<CommitmentCategory, Commitment[]>();
+  for (const c of unassigned) {
+    unassignedByCategory.set(c.category, [...(unassignedByCategory.get(c.category) ?? []), c]);
+  }
   const groups = [
     ...((properties ?? []) as Property[])
       .filter((p) => commitmentsByProperty.has(p.id))
@@ -158,9 +166,15 @@ export default async function CommitmentsPage({
       .map((p) => ({
         key: p.id,
         label: p.name,
+        type: "property" as const,
         commitments: sortCommitmentsByCost(commitmentsByProperty.get(p.id)!),
       })),
-    { key: "none", label: "No property", commitments: sortCommitmentsByCost(unassigned) },
+    ...COMMITMENT_CATEGORIES.map((cat) => ({
+      key: `category-${cat.value}`,
+      label: cat.label,
+      type: "category" as const,
+      commitments: sortCommitmentsByCost(unassignedByCategory.get(cat.value) ?? []),
+    })),
   ].filter((g) => g.commitments.length > 0);
 
   return (
@@ -254,7 +268,7 @@ export default async function CommitmentsPage({
                   <CollapsibleTableGroup
                     key={group.key}
                     label={group.label}
-                    href={group.key === "none" ? undefined : `/properties/${group.key}`}
+                    href={group.type === "property" ? `/properties/${group.key}` : undefined}
                     total={formatEUR(groupMonthly)}
                     colSpan={6}
                   >

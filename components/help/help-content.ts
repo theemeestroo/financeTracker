@@ -77,7 +77,23 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "You can create additional profiles and clone an existing one (duplicates its commitments and income) as a starting point for a what-if variant. Severance scenarios can switch to a different profile from a given date via a Cost Phase — see the severance scenario articles.",
+        text: "You can create additional profiles and clone an existing one (duplicates its properties, commitments, and income) as a starting point for a what-if variant. Severance scenarios can switch to a different profile from a given date via a Cost Phase — see the severance scenario articles.",
+      },
+      {
+        type: "p",
+        text: "On a cloned profile, each commitment or income row remembers the value it started at. Use the 'Adjust' control next to a row to move its amount up or down from there — a small badge shows the running difference (e.g. '+€50 vs baseline') so you can see at a glance how far that line item has drifted from where the profile began. This only appears on rows that came from a clone; items you add fresh to a profile have no baseline to compare against.",
+      },
+      {
+        type: "p",
+        text: "A profile's commitments are grouped by the property they're linked to — click a group to expand it, or its 'Delete all' button to remove every commitment linked to that property in one go, e.g. after deciding to sell it in this profile's what-if version. Anything not linked to a property is grouped by category instead (Housing, Utilities, Insurance, and so on), each its own collapsible section with its own subtotal.",
+      },
+      {
+        type: "p",
+        text: "The Income card and table show both net and gross — net is the headline figure, using each linked person's tax profile the same way the Income page does; a row whose share has no tax profile yet shows 'no tax profile' instead of guessing.",
+      },
+      {
+        type: "p",
+        text: "Once you have two or more profiles, a 'Compare' button on the Living Profiles list opens a side-by-side view — pick 2–4 profiles and see commitments (broken down by category), gross/net income, and the resulting net surplus or deficit lined up as columns.",
       },
     ],
   },
@@ -120,6 +136,10 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         type: "p",
         text: "A commitment can be split across household members by percentage (for shared costs) or left unattributed (a general household cost). It can also be linked to a property — linking a mortgage/insurance/utility bill to a property lets a severance scenario end all of them at once by ending the property, instead of deleting each commitment individually.",
+      },
+      {
+        type: "p",
+        text: "The list is grouped by property (each a collapsible section with its own subtotal); anything not linked to a property is grouped by category instead, in the same order as the list above.",
       },
       { type: "p", text: "Export the current commitment list as CSV from the commitments page." },
     ],
@@ -258,6 +278,10 @@ export const HELP_ARTICLES: HelpArticle[] = [
         type: "p",
         text: "If a severance is still months (or years) away, the chart and breakdown table also show every month between today and the severance event — the household's ordinary income and costs before the severance itself begins — so you can see the whole run-up at a glance, not just the months from the severance event onward. The depletion date and lowest balance figures stay based on the severance scenario itself, though, not these extra lead-in months.",
       },
+      {
+        type: "p",
+        text: "For a household with more than one person, everything on this tab also breaks out per person: a \"Runway status\" row shows each person's own depletion date alongside the household total, the month breakdown groups income and outgoings into each person's own section plus a \"Shared\" section for anything that isn't wholly one person's (a joint bill, or a cost split by percentage between you), and a \"Balance\" line shows each person's own running share alongside the total — each person's share is either their own income/cost outright, their real split percentage of a shared item, or an even split of a general household item with no owner set. The chart's hover tooltip and small colored dots on the balance line follow the same per-person breakdown, so you can see at a glance whether it's one person's spending or income driving a dip. With only one household member, none of this extra detail shows — the total is already the whole picture.",
+      },
     ],
   },
   {
@@ -280,11 +304,11 @@ export const HELP_ARTICLES: HelpArticle[] = [
     slug: "global-events-and-rules",
     title: "Global events & rules",
     category: "Severance & redundancy scenarios",
-    summary: "Mark a one-off event, property change, or savings rule as \"All scenarios\" so it applies everywhere without copy-pasting it into each one.",
+    summary: "Mark a one-off event, cost phase, property change, or savings rule as \"All scenarios\" so it applies everywhere without copy-pasting it into each one.",
     blocks: [
       {
         type: "p",
-        text: "Every one-off event, property change, and savings rule is either scoped to the one scenario it was created in, or global — applying to every scenario at once. Pick which when you add it: the add form has an \"Applies to\" toggle for \"This scenario only\" vs. \"All scenarios.\" Choosing \"All scenarios\" creates it directly in the Global list, not inside whichever scenario you happened to be viewing. A property can only have one global end date — if it already has one, edit that instead of adding a second.",
+        text: "Every one-off event, cost phase, property change, and savings rule is either scoped to the one scenario it was created in, or global — applying to every scenario at once. Pick which when you add it: the add form has an \"Applies to\" toggle for \"This scenario only\" vs. \"All scenarios.\" Choosing \"All scenarios\" creates it directly in the Global list, not inside whichever scenario you happened to be viewing. A property can only have one global end date — if it already has one, edit that instead of adding a second. A global cost phase has no such limit — a timeline can have as many global phases as you need.",
       },
       {
         type: "p",
@@ -292,7 +316,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "If just the amount (or, for a property change, the end date) needs to differ for one scenario, use Override right from that scenario's merged list — it supersedes the global default there only, without splitting the item into a separate copy; the row picks up an \"Overridden here\" badge, and a reset icon clears it back to the shared default. If more than that needs to diverge, use \"duplicate into this scenario\" instead — it makes a fully independent scenario-only copy seeded from the current values, and the global item stops counting in that one scenario so nothing is double-counted.",
+        text: "If just the amount (or, for a property change, the end date; or, for a cost phase, which Living Profile it switches to) needs to differ for one scenario, use Override right from that scenario's merged list — it supersedes the global default there only, without splitting the item into a separate copy; the row picks up an \"Overridden here\" badge, and a reset icon clears it back to the shared default. A cost phase's override only ever changes the profile, never the date it switches on. If more than that needs to diverge, use \"duplicate into this scenario\" instead — it makes a fully independent scenario-only copy seeded from the current values, and the global item stops counting in that one scenario so nothing is double-counted.",
       },
       {
         type: "note",
@@ -360,7 +384,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
     blocks: [
       {
         type: "p",
-        text: "A Cost Phase switches the scenario to a different Living Profile from a given date — the whole set of commitments and income changes at once (e.g. modeling a move to a cheaper home 6 months in), rather than editing individual line items.",
+        text: "A Cost Phase switches the scenario to a different Living Profile from a given date — the whole set of commitments and income changes at once (e.g. modeling a move to a cheaper home 6 months in), rather than editing individual line items. It can also be marked global instead of scoped to this one scenario — see Global events & rules — so every scenario switches profile at the same date by default; a scenario can still override just which profile it switches to there, without changing the date.",
       },
       {
         type: "p",
@@ -504,14 +528,14 @@ export const HELP_ARTICLES: HelpArticle[] = [
         items: [
           "Auth — login, logout: the Supabase Auth session itself.",
           "Household — createHouseholdMember, updateHouseholdMember, deleteHouseholdMember; upsertTaxProfile for Steuerklasse/church tax/children.",
-          "Income & commitments — createIncome/updateIncome/deleteIncome; createCommitment/updateCommitment/deleteCommitment, both including their split rows.",
+          "Income & commitments — createIncome/updateIncome/deleteIncome/adjustIncomeAmount; createCommitment/updateCommitment/deleteCommitment/adjustCommitmentAmount/deleteCommitmentsByProperty, both including their split rows. The adjust* actions only touch the amount field, for the profile detail page's baseline-adjustment control; deleteCommitmentsByProperty is that same page's per-property \"Delete all\" bulk action.",
           "Properties — createProperty, updateProperty, deleteProperty, plus ownership splits.",
-          "Living Profiles — createLivingProfile, cloneLivingProfile (also duplicates the source profile's commitments/income), updateLivingProfile, deleteLivingProfile, updateCurrentLiquidSavings (the baseline's \"do-nothing\" reference figure).",
+          "Living Profiles — createLivingProfile, cloneLivingProfile (also duplicates the source profile's properties/property_splits/commitments/income, snapshotting each commitment/income row's starting value as its baseline and remapping cloned commitments onto the new profile's own copy of each property), updateLivingProfile, deleteLivingProfile, updateCurrentLiquidSavings (the baseline's \"do-nothing\" reference figure).",
           "Severance scenarios — createScenario, updateScenario, deleteScenario (cascades to every child table); duplicateScenario deep-clones a scenario's packages/phases/events/property-ends/savings rules into a new one and takes you straight to it.",
-          "Scenario packages, phases, events & property-ends — addScenarioPackage/updateScenarioPackage/deleteScenarioPackage; addScenarioPhase/deleteScenarioPhase; addScenarioEvent/deleteScenarioEvent (creates directly in the Global list instead when scoped \"All scenarios\"), setEventOverride/clearEventOverride/duplicateGlobalEventIntoScenario/dismissStaleEventOverride; addScenarioPropertyEnd/deleteScenarioPropertyEnd (same \"All scenarios\" global-insert exception as addScenarioEvent), setPropertyEndOverride/clearPropertyEndOverride/duplicateGlobalPropertyEndIntoScenario/dismissStalePropertyEndOverride.",
+          "Scenario packages, phases, events & property-ends — addScenarioPackage/updateScenarioPackage/deleteScenarioPackage; addScenarioPhase/deleteScenarioPhase (creates directly in the Global list instead when scoped \"All scenarios\"), setPhaseOverride/clearPhaseOverride/duplicateGlobalPhaseIntoScenario/dismissStalePhaseOverride (the override only ever supersedes profile_id, never start_date); addScenarioEvent/deleteScenarioEvent (same \"All scenarios\" global-insert exception as addScenarioPhase), setEventOverride/clearEventOverride/duplicateGlobalEventIntoScenario/dismissStaleEventOverride; addScenarioPropertyEnd/deleteScenarioPropertyEnd (same \"All scenarios\" global-insert exception), setPropertyEndOverride/clearPropertyEndOverride/duplicateGlobalPropertyEndIntoScenario/dismissStalePropertyEndOverride.",
           "Scenario checklist — addChecklistItem, toggleChecklistItem, deleteChecklistItem.",
           "Savings & investment rules — addSavingsRule (re-validates the target package's own headroom server-side, not just in the form), deleteSavingsRule, setSavingsRuleOverride/clearSavingsRuleOverride/duplicateGlobalSavingsRuleIntoScenario/dismissStaleSavingsRuleOverride.",
-          "Global events & rules — addGlobalEvent/updateGlobalEvent/deleteGlobalEvent, addGlobalSavingsRule/updateGlobalSavingsRule/deleteGlobalSavingsRule, addGlobalPropertyEnd/updateGlobalPropertyEnd/deleteGlobalPropertyEnd: the shared objects behind Global Rules, edited independently of any scenario. Deleting one flags (doesn't delete) any scenario override tied to it.",
+          "Global events & rules — addGlobalEvent/updateGlobalEvent/deleteGlobalEvent, addGlobalPhase/updateGlobalPhase/deleteGlobalPhase, addGlobalSavingsRule/updateGlobalSavingsRule/deleteGlobalSavingsRule, addGlobalPropertyEnd/updateGlobalPropertyEnd/deleteGlobalPropertyEnd: the shared objects behind Global Rules, edited independently of any scenario. Deleting one flags (doesn't delete) any scenario override tied to it.",
           "Scenario variants — generateScenarioVariants: bulk-creates several derived scenarios (different job-search timing assumptions) in one step.",
         ],
       },

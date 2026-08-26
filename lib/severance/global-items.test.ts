@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { mergeScenarioEvents, mergeScenarioPropertyEnds, mergeScenarioSavingsRules } from "./global-items";
+import {
+  mergePhases,
+  mergeScenarioEvents,
+  mergeScenarioPropertyEnds,
+  mergeScenarioSavingsRules,
+} from "./global-items";
 import type {
   SeveranceGlobalEventOverride,
+  SeveranceGlobalPhaseOverride,
   SeveranceGlobalPropertyEndOverride,
   SeveranceGlobalSavingsRuleOverride,
   SeveranceScenarioEvent,
+  SeveranceScenarioPhase,
   SeveranceScenarioPropertyEnd,
   SeveranceScenarioSavingsRule,
 } from "@/lib/types";
@@ -289,5 +296,86 @@ describe("mergeScenarioSavingsRules", () => {
       packageIdByMember
     );
     expect(merged).toEqual([]);
+  });
+});
+
+function scenarioPhase(overrides: Partial<SeveranceScenarioPhase> = {}): SeveranceScenarioPhase {
+  return {
+    id: "ph-scenario",
+    scope: "scenario",
+    scenario_id: "s1",
+    profile_id: "profile-1",
+    start_date: "2027-01-01",
+    label: null,
+    ...overrides,
+  };
+}
+
+function globalPhase(overrides: Partial<SeveranceScenarioPhase> = {}): SeveranceScenarioPhase {
+  return {
+    id: "ph-global",
+    scope: "global",
+    scenario_id: null,
+    profile_id: "profile-2",
+    start_date: "2027-02-01",
+    label: "Move to Thailand",
+    ...overrides,
+  };
+}
+
+function phaseOverride(overrides: Partial<SeveranceGlobalPhaseOverride> = {}): SeveranceGlobalPhaseOverride {
+  return {
+    id: "o1",
+    global_phase_id: "ph-global",
+    scenario_id: "s1",
+    profile_id: null,
+    suppressed: false,
+    orphaned_item_name: null,
+    stale_since: null,
+    ...overrides,
+  };
+}
+
+describe("mergePhases", () => {
+  it("includes every scenario-scoped phase unchanged", () => {
+    const merged = mergePhases([scenarioPhase()], [], []);
+    expect(merged).toEqual([
+      expect.objectContaining({ id: "ph-scenario", scope: "scenario", profile_id: "profile-1" }),
+    ]);
+  });
+
+  it("includes a global phase with its own default profile_id when there's no override", () => {
+    const merged = mergePhases([], [globalPhase()], []);
+    expect(merged).toEqual([
+      expect.objectContaining({
+        id: "ph-global",
+        scope: "global",
+        profile_id: "profile-2",
+        start_date: "2027-02-01",
+        isOverridden: false,
+      }),
+    ]);
+  });
+
+  it("applies a scenario's override onto profile_id, leaving start_date/label untouched", () => {
+    const merged = mergePhases([], [globalPhase()], [phaseOverride({ profile_id: "profile-3" })]);
+    expect(merged[0]).toEqual(
+      expect.objectContaining({
+        profile_id: "profile-3",
+        start_date: "2027-02-01",
+        label: "Move to Thailand",
+        isOverridden: true,
+      })
+    );
+  });
+
+  it("drops a suppressed global phase entirely (superseded by a scenario-local duplicate)", () => {
+    const merged = mergePhases([], [globalPhase()], [phaseOverride({ suppressed: true, profile_id: null })]);
+    expect(merged).toEqual([]);
+  });
+
+  it("leaves an override for a different scenario alone (id-keyed, not scenario-keyed)", () => {
+    const merged = mergePhases([], [globalPhase()], [phaseOverride({ scenario_id: "other-scenario" })]);
+    expect(merged[0].isOverridden).toBe(false);
   });
 });

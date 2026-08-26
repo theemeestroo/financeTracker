@@ -12,6 +12,7 @@ import {
   mergeScenarioEvents,
   mergeScenarioPropertyEnds,
   mergeScenarioSavingsRules,
+  mergePhases,
 } from "@/lib/severance";
 import {
   alg1DurationMonths,
@@ -29,10 +30,11 @@ import {
 import { addDays, addMonths, ageInYears } from "@/lib/finance/date-utils";
 import type { Split } from "@/lib/finance/splits";
 import { toTaxProfile } from "@/lib/finance/tax-profile-context";
-import { healthInsuranceOutgoings } from "@/lib/finance/health-insurance-outgoing";
+import { healthInsuranceOutgoings, healthInsuranceOutgoingMemberId } from "@/lib/finance/health-insurance-outgoing";
 import { aggregateAnnualIncomeByMember, precedingMonthsSeries, resolveSavingsPrincipal } from "@/lib/runway";
 import { combinedIncomeBreakdown } from "@/lib/finance/income-gross";
 import type {
+  ResolvedCommitment,
   ResolvedIncome,
   ResolvedSavingsRule,
   ResolvedSeveranceScenario,
@@ -41,15 +43,18 @@ import type {
 } from "@/lib/runway";
 import type {
   Commitment,
+  CommitmentSplit,
   HouseholdMember,
   Income,
   IncomeSplit,
   SeveranceGlobalEventOverride,
+  SeveranceGlobalPhaseOverride,
   SeveranceGlobalPropertyEndOverride,
   SeveranceGlobalSavingsRuleOverride,
   SeveranceScenario,
   SeveranceScenarioEvent,
   SeveranceScenarioPackage,
+  SeveranceScenarioPhase,
   SeveranceScenarioPropertyEnd,
   SeveranceScenarioSavingsRule,
   TaxProfileRow,
@@ -197,6 +202,8 @@ export async function resolveScenario(
   const [
     { data: packageRows },
     { data: phaseRows },
+    { data: globalPhaseRows },
+    { data: phaseOverrideRows },
     { data: eventRows },
     { data: globalEventRows },
     { data: eventOverrideRows },
@@ -212,11 +219,19 @@ export async function resolveScenario(
         .select("*")
         .eq("scenario_id", scenario.id)
         .order("severance_start_date"),
+      // scope="global" rows have scenario_id=null, so this already excludes
+      // them — global phases are fetched separately below and merged in.
       supabase
         .from("severance_scenario_phases")
         .select("id, profile_id, start_date, label")
         .eq("scenario_id", scenario.id)
         .order("start_date"),
+      supabase
+        .from("severance_scenario_phases")
+        .select("id, profile_id, start_date, label")
+        .eq("scope", "global")
+        .order("start_date"),
+      supabase.from("severance_global_phase_overrides").select("*").eq("scenario_id", scenario.id),
       // scope="global" rows have scenario_id=null, so this already excludes
       // them — global events are fetched separately below and merged in.
       supabase.from("severance_scenario_events").select("*").eq("scenario_id", scenario.id),
@@ -397,7 +412,16 @@ export async function resolveScenario(
   });
 
   // ── Runway inputs ────────────────────────────────────────────────────
-  const phases = phaseRows ?? [];
+  // This scenario's own phases plus every applicable global one
+  // (override-aware, superseding only profile_id — the trigger date always
+  // stays the global phase's own). Sorted by start_date since the merge
+  // itself doesn't guarantee ordering across scenario- and global-sourced
+  // rows — activeProfileFor (lib/runway/monthly-items.ts) requires it.
+  const phases = mergePhases(
+    (phaseRows ?? []) as SeveranceScenarioPhase[],
+    (globalPhaseRows ?? []) as SeveranceScenarioPhase[],
+    (phaseOverrideRows ?? []) as SeveranceGlobalPhaseOverride[]
+  ).sort((a, b) => (a.start_date < b.start_date ? -1 : a.start_date > b.start_date ? 1 : 0));
   if (phases.length === 0 || packages.length === 0) {
     return { runwayScenario: null, packageSummaries, taxYear };
   }
@@ -447,6 +471,19 @@ export async function resolveScenario(
     return { ...c, end_date };
   });
 
+  // Who each commitment belongs to (see CommitmentSplit's own doc) — used
+  // below to attribute the runway's per-person balance
+  // (lib/runway/monthly-items.ts's memberDeltas), the same way
+  // splitsByIncome already does for income.
+  const { data: commitmentSplitRows } = await supabase
+    .from("commitment_splits")
+    .select("id, commitment_id, household_member_id, percentage")
+    .in("commitment_id", commitmentsWithPropertyEnds.map((c) => c.id));
+  const splitsByCommitment = new Map<string, Split[]>();
+  for (const s of (commitmentSplitRows ?? []) as CommitmentSplit[]) {
+    splitsByCommitment.set(s.commitment_id, [...(splitsByCommitment.get(s.commitment_id) ?? []), s]);
+  }
+
   // Each package's own household member's ordinary salary is replaced by
   // their own garden-leave pay (during notice) and then their own net
   // severance lump sum — both computed above — so their salary income row
@@ -490,12 +527,31 @@ export async function resolveScenario(
     healthInsuranceCutoffByMember
   );
 
-  const commitmentsByProfile = new Map<string, Commitment[]>();
+  // healthInsuranceCommitments are never persisted (see their own doc
+  // comment), so they have no commitment_splits row — each is already
+  // exactly one member's own premium, so a synthetic 100% split stands in,
+  // recovering the member from the row's own id convention.
+  const healthInsuranceCommitmentsResolved: ResolvedCommitment[] = healthInsuranceCommitments.map((c) => ({
+    ...c,
+    splits: [
+      {
+        id: `${c.id}-split`,
+        commitment_id: c.id,
+        household_member_id: healthInsuranceOutgoingMemberId(c.id),
+        percentage: 100,
+      },
+    ],
+  }));
+
+  const commitmentsByProfile = new Map<string, ResolvedCommitment[]>();
   const incomeByProfile = new Map<string, ResolvedIncome[]>();
   for (const pid of profileIds) {
     commitmentsByProfile.set(
       pid,
-      commitmentsWithPropertyEnds.filter((c) => c.profile_id === pid).concat(healthInsuranceCommitments)
+      commitmentsWithPropertyEnds
+        .filter((c) => c.profile_id === pid)
+        .map((c) => ({ ...c, splits: splitsByCommitment.get(c.id) ?? [] }))
+        .concat(healthInsuranceCommitmentsResolved)
     );
     incomeByProfile.set(
       pid,
@@ -564,6 +620,7 @@ export async function resolveScenario(
   const runwayScenario: ResolvedSeveranceScenario = {
     startingBalance: scenario.starting_balance,
     severances,
+    householdMemberIds: householdMembers.map((m) => m.id),
     phases: phases.map((p) => ({
       startDate: p.start_date,
       profile: {

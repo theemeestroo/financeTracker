@@ -4,7 +4,13 @@ import { addMonths } from "@/lib/finance/date-utils";
 import { projectRunway } from "./project-runway";
 import type { Split } from "@/lib/finance/splits";
 import type { Commitment, Income, TaxProfile } from "@/lib/types";
-import type { ResolvedIncome, ResolvedSavingsRule, ResolvedSeveranceScenario, SeveranceStream } from "./types";
+import type {
+  ResolvedCommitment,
+  ResolvedIncome,
+  ResolvedSavingsRule,
+  ResolvedSeveranceScenario,
+  SeveranceStream,
+} from "./types";
 
 const taxProfile: TaxProfile = {
   id: "tp1",
@@ -18,7 +24,8 @@ const taxProfile: TaxProfile = {
   private_health_insurance_monthly_premium: null,
 };
 
-function commitment(overrides: Partial<Commitment>): Commitment {
+function commitment(overrides: Partial<Commitment> & { splits?: Split[] }): ResolvedCommitment {
+  const { splits, ...commitmentOverrides } = overrides;
   return {
     id: "c1",
     profile_id: "p1",
@@ -30,7 +37,9 @@ function commitment(overrides: Partial<Commitment>): Commitment {
     start_date: "2020-01-01",
     end_date: null,
     property_id: null,
-    ...overrides,
+    baseline_amount: null,
+    ...commitmentOverrides,
+    splits: splits ?? [],
   };
 }
 
@@ -54,6 +63,7 @@ function income(overrides: Partial<Income> & { splits?: Split[] }): ResolvedInco
     monthly_pension_contribution: 0,
     monthly_company_car_cost: 0,
     rental_overhead_pct: 0,
+    baseline_gross_amount: null,
     currency: "EUR",
     exchange_rate_to_eur: 1,
     ...incomeOverrides,
@@ -206,6 +216,7 @@ describe("projectRunway — month breakdown", () => {
     expect(month2.breakdown?.inflows).toContainEqual({
       label: "Alex — severance lump sum (net)",
       amount: 10000,
+      householdMemberId: "m1",
     });
   });
 });
@@ -670,5 +681,108 @@ describe("projectRunway — savings/investment rules", () => {
     });
     const item = result.series[0].breakdown?.outflows.find((i) => i.label.includes("investment return"));
     expect(item?.amount).toBeCloseTo(1000, 5); // untaxed — full -1% of the 100000 pot shown as an outflow
+  });
+});
+
+describe("projectRunway — per-member balance", () => {
+  it("attributes a fully-individual commitment to its own member and splits an unattributed one evenly", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 1000,
+      householdMemberIds: ["m1", "m2"],
+      horizonMonths: 1,
+      phases: [
+        {
+          startDate: "2026-01-01",
+          profile: {
+            commitments: [
+              commitment({ id: "c1", name: "Alex's gym", amount: 100, splits: [{ household_member_id: "m1", percentage: 100 }] }),
+              commitment({ id: "c2", name: "Household groceries", amount: 200, splits: [] }),
+            ],
+            income: [],
+          },
+        },
+      ],
+    });
+
+    const point = result.series[0];
+    // starting balance 1000 -> 500/500; m1 also bears their own 100 gym
+    // cost plus half the unattributed 200 groceries (100).
+    expect(point.balanceByMember?.m1).toBeCloseTo(500 - 100 - 100, 5);
+    // m2 only bears their half of the unattributed groceries cost.
+    expect(point.balanceByMember?.m2).toBeCloseTo(500 - 100, 5);
+    expect((point.balanceByMember?.m1 ?? 0) + (point.balanceByMember?.m2 ?? 0)).toBeCloseTo(point.balance, 5);
+  });
+
+  it("prorates a percentage-split commitment by its real shares, not evenly", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 0,
+      householdMemberIds: ["m1", "m2"],
+      horizonMonths: 1,
+      severances: [stream({ netSeveranceLumpSum: 0 })],
+      phases: [
+        {
+          startDate: "2026-01-01",
+          profile: {
+            commitments: [
+              commitment({
+                id: "c1",
+                name: "Rent",
+                amount: 1000,
+                splits: [
+                  { household_member_id: "m1", percentage: 70 },
+                  { household_member_id: "m2", percentage: 30 },
+                ],
+              }),
+            ],
+            income: [],
+          },
+        },
+      ],
+    });
+
+    const point = result.series[0];
+    expect(point.balanceByMember?.m1).toBeCloseTo(-700, 5);
+    expect(point.balanceByMember?.m2).toBeCloseTo(-300, 5);
+  });
+
+  it("tracks each member's own depletion date against their own prorated sub-balance", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 0,
+      householdMemberIds: ["m1", "m2"],
+      horizonMonths: 4,
+      severances: [stream({ householdMemberId: "m1", netSeveranceLumpSum: 3000 })],
+      phases: [
+        {
+          startDate: "2026-01-01",
+          profile: {
+            commitments: [commitment({ id: "c1", name: "Household rent", amount: 1000, splits: [] })],
+            income: [],
+          },
+        },
+      ],
+    });
+
+    // m2 has no income at all — only their unattributed 500/mo share of
+    // rent — so their own sub-balance goes negative the very first month.
+    expect(result.perMember?.find((p) => p.householdMemberId === "m2")?.depletionDate).toBe("2026-01-01");
+    // m1 gets the full 3000 lump sum that same month, comfortably covering
+    // their own share of rent for the rest of the (short) horizon.
+    expect(result.perMember?.find((p) => p.householdMemberId === "m1")?.depletionDate).toBeNull();
+    // The household total still depletes, though — m2's own shortfall
+    // drags it down even though m1 individually would be fine, exactly
+    // the divergence per-person tracking exists to surface.
+    expect(result.depletionDate).toBe("2026-04-01");
+  });
+
+  it("omits balanceByMember/perMember entirely when the scenario doesn't supply a household roster", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      severances: [stream({ netSeveranceLumpSum: 1000 })],
+    });
+    expect(result.series[0].balanceByMember).toBeUndefined();
+    expect(result.perMember).toBeUndefined();
   });
 });

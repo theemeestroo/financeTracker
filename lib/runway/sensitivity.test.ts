@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { sensitivityAnalysis } from "./sensitivity";
-import type { ResolvedSeveranceScenario } from "./types";
+import type { ResolvedCommitment, ResolvedSeveranceScenario } from "./types";
+import type { Split } from "@/lib/finance/splits";
 import type { Commitment } from "@/lib/types";
 
-function commitment(overrides: Partial<Commitment> & Pick<Commitment, "id" | "category" | "amount" | "essential">): Commitment {
+function commitment(
+  overrides: Partial<Commitment> & Pick<Commitment, "id" | "category" | "amount" | "essential"> & { splits?: Split[] }
+): ResolvedCommitment {
+  const { splits, ...commitmentOverrides } = overrides;
   return {
     profile_id: "p1",
     name: overrides.id,
@@ -11,14 +15,16 @@ function commitment(overrides: Partial<Commitment> & Pick<Commitment, "id" | "ca
     start_date: "2020-01-01",
     end_date: null,
     property_id: null,
-    ...overrides,
+    baseline_amount: null,
+    ...commitmentOverrides,
+    splits: splits ?? [],
   };
 }
 
 // One severance stream: no garden leave, no ALG I — lump sum lands the
 // severance month, then pure burn at the phase's commitment total.
 function scenario(
-  commitments: Commitment[],
+  commitments: ResolvedCommitment[],
   { horizonMonths, netSeveranceLumpSum = 6000 }: { horizonMonths?: number; netSeveranceLumpSum?: number } = {}
 ): ResolvedSeveranceScenario {
   return {

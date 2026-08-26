@@ -5,9 +5,11 @@ import type {
   ScenarioEventType,
   ScenarioItemScope,
   SeveranceGlobalEventOverride,
+  SeveranceGlobalPhaseOverride,
   SeveranceGlobalPropertyEndOverride,
   SeveranceGlobalSavingsRuleOverride,
   SeveranceScenarioEvent,
+  SeveranceScenarioPhase,
   SeveranceScenarioPropertyEnd,
   SeveranceScenarioSavingsRule,
 } from "@/lib/types";
@@ -219,6 +221,63 @@ export function mergeScenarioSavingsRules(
         annual_return_pct: r.annual_return_pct,
         accrual_frequency: r.accrual_frequency,
         packageId,
+        isOverridden,
+      },
+    ];
+  });
+
+  return [...scenarioMerged, ...globalMerged];
+}
+
+/**
+ * One scenario's merged view of a cost phase — mirrors `MergedPropertyEnd`
+ * above, but supersedes `profile_id` instead of `end_date`. `start_date`/
+ * `label` are never overridden (a deliberate product decision, not a
+ * technical limitation — the trigger date always stays the global phase's
+ * own), so unlike the other three merge functions there's no "which field is
+ * overridable" branch — it's always `profile_id`.
+ */
+export type MergedPhase = {
+  id: string;
+  scope: ScenarioItemScope;
+  profile_id: string;
+  start_date: string;
+  label: string | null;
+  isOverridden: boolean;
+};
+
+/**
+ * Merges this scenario's own cost phases with every global phase that still
+ * applies to it. A global row is dropped entirely when its override for this
+ * scenario has `suppressed = true`, same reasoning as `mergeScenarioEvents`.
+ */
+export function mergePhases(
+  scenarioPhases: SeveranceScenarioPhase[],
+  globalPhases: SeveranceScenarioPhase[],
+  overrides: SeveranceGlobalPhaseOverride[]
+): MergedPhase[] {
+  const overrideByGlobalId = new Map(overrides.map((o) => [o.global_phase_id, o]));
+
+  const scenarioMerged: MergedPhase[] = scenarioPhases.map((p) => ({
+    id: p.id,
+    scope: "scenario",
+    profile_id: p.profile_id,
+    start_date: p.start_date,
+    label: p.label,
+    isOverridden: false,
+  }));
+
+  const globalMerged: MergedPhase[] = globalPhases.flatMap((p) => {
+    const override = overrideByGlobalId.get(p.id);
+    if (override?.suppressed) return [];
+    const isOverridden = override?.profile_id != null;
+    return [
+      {
+        id: p.id,
+        scope: "global",
+        profile_id: isOverridden ? override!.profile_id! : p.profile_id,
+        start_date: p.start_date,
+        label: p.label,
         isOverridden,
       },
     ];

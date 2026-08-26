@@ -187,6 +187,19 @@ async function ComparisonResults({ scenarios }: { scenarios: SeveranceScenario[]
     const value = field === "gross" ? share.gross : share.net;
     return value != null ? formatEUR(value) : "—";
   };
+  // Each person's own depletion date (RunwayResult.perMember) — shown even
+  // when the scenario's household total is sustainable, since one person's
+  // sub-balance can still go negative while another's surplus covers it.
+  const depletionValueFor = (r: Resolved, memberId: string) => {
+    if (!r.runway?.perMember) return "—";
+    const pm = r.runway.perMember.find((p) => p.householdMemberId === memberId);
+    if (!pm) return "—";
+    return (
+      <span style={{ color: pm.depletionDate ? "var(--status-critical)" : "var(--status-good)" }}>
+        {pm.depletionDate ? formatDateDisplay(pm.depletionDate) : "Sustainable"}
+      </span>
+    );
+  };
 
   // Scenarios as columns, metrics as rows — reads more like a comparison
   // matrix than the other way round once there's this many values, since
@@ -250,6 +263,11 @@ async function ComparisonResults({ scenarios }: { scenarios: SeveranceScenario[]
           </Badge>
         ),
     },
+    ...allMemberIds.map((id) => ({
+      label: memberById.get(id) ?? "—",
+      sub: true,
+      render: (r: Resolved) => depletionValueFor(r, id),
+    })),
   ];
 
   return (

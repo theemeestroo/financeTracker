@@ -45,8 +45,11 @@ function ChartTooltip({
       </div>
       {entry.lines.length > 0 && (
         <div className="mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5">
-          {entry.lines.map((line) => (
-            <div key={line.name} className="flex items-baseline justify-between gap-4 text-xs">
+          {entry.lines.map((line, index) => (
+            <div
+              key={`${line.name}-${index}`}
+              className="flex items-baseline justify-between gap-4 text-xs"
+            >
               <span className="text-muted-foreground">{line.name}</span>
               <span className="shrink-0 tabular-nums text-popover-foreground">
                 {formatEUR(line.monthly)}/mo

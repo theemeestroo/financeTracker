@@ -1,6 +1,7 @@
 import { toMonthlyEquivalent } from "@/lib/finance/frequency";
 import { firstOfMonth, addMonths } from "@/lib/finance/date-utils";
 import { calculateNetIncome, calculateCapitalGainsTax } from "@/lib/tax";
+import { memberSharesOfAmount } from "@/lib/finance/splits";
 import { isAccrualMonth, periodicAccrual, PERIODS_PER_YEAR } from "./savings";
 import { activeProfileFor, monthlyIncomeItems, monthlyCommitmentItems } from "./monthly-items";
 import type { TaxProfile } from "@/lib/types";
@@ -9,9 +10,29 @@ import type {
   RunwayResult,
   RunwayPoint,
   RunwayLineItem,
+  PerMemberRunway,
 } from "./types";
 
 const DEFAULT_HORIZON_MONTHS = 120;
+
+/** Folds `amount` into `memberDeltas` — a named member's own item goes
+ *  straight to them, an unattributed one (no owner field exists at all for
+ *  a one-off scenario event, say) divides evenly across `householdMemberIds`.
+ *  Reuses `memberSharesOfAmount`'s same splits-or-even-fallback logic
+ *  `monthly-items.ts` uses for commitments/income, just expressed as a
+ *  single owner instead of a `Split[]`. */
+function attributeToMember(
+  memberDeltas: Map<string, number>,
+  memberId: string | undefined,
+  amount: number,
+  householdMemberIds: string[]
+) {
+  if (amount === 0) return;
+  const splits = memberId ? [{ household_member_id: memberId, percentage: 100 }] : [];
+  for (const [id, share] of memberSharesOfAmount(amount, splits, householdMemberIds)) {
+    memberDeltas.set(id, (memberDeltas.get(id) ?? 0) + share);
+  }
+}
 
 /**
  * Month-by-month balance projection for a severance scenario (DESIGN §7).
@@ -62,7 +83,19 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
     newJobStartMonth: s.newJobStartDate ? firstOfMonth(s.newJobStartDate) : null,
   }));
 
+  const householdMemberIds = scenario.householdMemberIds ?? [];
   let balance = scenario.startingBalance;
+  // Each member's own prorated sub-balance, seeded from an even share of
+  // the starting balance (there's no data attributing the household's
+  // existing savings to one person over another) — every month's delta is
+  // then divided the same way `items` themselves are attributed (see
+  // `attributeToMember`/`monthly-items.ts`'s `memberDeltas`), so these
+  // always sum back to `balance`. Empty when the scenario didn't supply a
+  // roster — per-member tracking is then skipped entirely below.
+  const memberBalances = new Map<string, number>(
+    householdMemberIds.map((id) => [id, householdMemberIds.length > 0 ? balance / householdMemberIds.length : 0])
+  );
+  const memberDepletionDate = new Map<string, string | null>(householdMemberIds.map((id) => [id, null]));
   // Each savings rule's own segregated pot — seeded from its resolved
   // principal the moment its own `startMonth` arrives, not before (the
   // money isn't invested until the severance lump sum it comes from has
@@ -92,12 +125,32 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
     const date = addMonths(startMonth, m);
     const phase = activeProfileFor(date, scenario.phases);
 
-    const commitmentItems = monthlyCommitmentItems(phase, date);
+    const { items: commitmentItems, memberDeltas: commitmentMemberDeltas } = monthlyCommitmentItems(
+      phase,
+      date,
+      householdMemberIds
+    );
+    const { items: incomeItems, memberDeltas: incomeMemberDeltas } = monthlyIncomeItems(
+      phase,
+      date,
+      scenario.taxProfileByMember,
+      scenario.taxYear,
+      householdMemberIds
+    );
     const monthlyCost = -commitmentItems.reduce((sum, i) => sum + i.amount, 0);
-    const items: RunwayLineItem[] = [
-      ...commitmentItems,
-      ...monthlyIncomeItems(phase, date, scenario.taxProfileByMember, scenario.taxYear),
-    ];
+    const items: RunwayLineItem[] = [...commitmentItems, ...incomeItems];
+
+    // Commitments/income already come fully prorated (percentage-split
+    // where set, evenly divided where not) — merge them in directly rather
+    // than through `attributeToMember`, which only knows a single owner or
+    // none and would collapse a real 70/30 split back down to an even one.
+    const monthMemberDeltas = new Map<string, number>();
+    for (const [id, amount] of commitmentMemberDeltas) {
+      monthMemberDeltas.set(id, (monthMemberDeltas.get(id) ?? 0) + amount);
+    }
+    for (const [id, amount] of incomeMemberDeltas) {
+      monthMemberDeltas.set(id, (monthMemberDeltas.get(id) ?? 0) + amount);
+    }
 
     for (const stream of streams) {
       if (date < stream.startMonth) continue;
@@ -108,12 +161,15 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
           householdMemberId: stream.householdMemberId,
           grossAmount: stream.gardenLeaveGrossMonthly,
         });
+        attributeToMember(monthMemberDeltas, stream.householdMemberId, stream.gardenLeaveNetMonthly, householdMemberIds);
       }
       if (date === stream.paymentMonth) {
         items.push({
           label: `${stream.householdMemberName} — severance lump sum (net)`,
           amount: stream.netSeveranceLumpSum,
+          householdMemberId: stream.householdMemberId,
         });
+        attributeToMember(monthMemberDeltas, stream.householdMemberId, stream.netSeveranceLumpSum, householdMemberIds);
       }
 
       // ALG I income + post-severance health insurance — both stop the
@@ -130,10 +186,16 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
             householdMemberId: stream.householdMemberId,
             taxExempt: true,
           });
+          attributeToMember(monthMemberDeltas, stream.householdMemberId, stream.algMonthlyNet, householdMemberIds);
         }
         const healthCost = onAlg ? stream.healthAlgMonthly : stream.healthGapMonthly;
         if (healthCost) {
-          items.push({ label: `${stream.householdMemberName} — health insurance`, amount: -healthCost });
+          items.push({
+            label: `${stream.householdMemberName} — health insurance`,
+            amount: -healthCost,
+            householdMemberId: stream.householdMemberId,
+          });
+          attributeToMember(monthMemberDeltas, stream.householdMemberId, -healthCost, householdMemberIds);
         }
       }
     }
@@ -142,9 +204,15 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
       const eventMonth = firstOfMonth(event.date);
       if (eventMonth !== date) continue;
 
-      if (event.eventType === "one_off_outflow") items.push({ label: event.name, amount: -(event.amount ?? 0) });
-      else if (event.eventType === "one_off_inflow") items.push({ label: event.name, amount: event.amount ?? 0 });
-      else if (event.eventType === "recurring_income_start" && event.recurringGrossAmount) {
+      if (event.eventType === "one_off_outflow") {
+        const amount = -(event.amount ?? 0);
+        items.push({ label: event.name, amount });
+        attributeToMember(monthMemberDeltas, undefined, amount, householdMemberIds);
+      } else if (event.eventType === "one_off_inflow") {
+        const amount = event.amount ?? 0;
+        items.push({ label: event.name, amount });
+        attributeToMember(monthMemberDeltas, undefined, amount, householdMemberIds);
+      } else if (event.eventType === "recurring_income_start" && event.recurringGrossAmount) {
         activeRecurringEvents.push({
           name: event.name,
           grossAmount: event.recurringGrossAmount,
@@ -167,6 +235,7 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
         householdMemberId: rec.taxProfile?.household_member_id,
         grossAmount: rec.taxProfile ? grossMonthly : undefined,
       });
+      attributeToMember(monthMemberDeltas, rec.taxProfile?.household_member_id, amount, householdMemberIds);
     }
 
     // Each rule accrues against its own pot (seeded from principal, grown
@@ -203,6 +272,7 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
         grossAmount: grossAccrued,
         investmentIncome: true,
       });
+      attributeToMember(monthMemberDeltas, rule.householdMemberId || undefined, netAccrued, householdMemberIds);
     }
 
     const monthDelta = items.reduce((sum, i) => sum + i.amount, 0);
@@ -225,11 +295,26 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
       }
     }
 
+    // Each member's own sub-balance, updated by their own share of this
+    // month's delta (already fully attributed above — commitments/income
+    // via their own memberDeltas, everything else via attributeToMember) —
+    // always sums to `balance` by construction.
+    let balanceByMember: Record<string, number> | undefined;
+    if (householdMemberIds.length > 0) {
+      balanceByMember = {};
+      for (const id of householdMemberIds) {
+        const updated = (memberBalances.get(id) ?? 0) + (monthMemberDeltas.get(id) ?? 0);
+        memberBalances.set(id, updated);
+        balanceByMember[id] = updated;
+        if (memberDepletionDate.get(id) === null && updated < 0) memberDepletionDate.set(id, date);
+      }
+    }
+
     const breakdown = {
       inflows: items.filter((i) => i.amount > 0),
-      outflows: items.filter((i) => i.amount < 0).map((i) => ({ label: i.label, amount: -i.amount })),
+      outflows: items.filter((i) => i.amount < 0).map((i) => ({ ...i, amount: -i.amount })),
     };
-    series.push({ date, balance, monthlyCost, breakdown });
+    series.push({ date, balance, monthlyCost, breakdown, balanceByMember });
 
     if (depletionDate === null && balance < 0) {
       depletionDate = date;
@@ -240,5 +325,13 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
     }
   }
 
-  return { series, depletionDate, lowestBalance, lowestBalanceDate };
+  const perMember: PerMemberRunway[] | undefined =
+    householdMemberIds.length > 0
+      ? householdMemberIds.map((id) => ({
+          householdMemberId: id,
+          depletionDate: memberDepletionDate.get(id) ?? null,
+        }))
+      : undefined;
+
+  return { series, depletionDate, lowestBalance, lowestBalanceDate, perMember };
 }

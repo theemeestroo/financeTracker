@@ -14,6 +14,7 @@ function commitment(
     start_date: "2020-01-01",
     end_date: null,
     property_id: null,
+    baseline_amount: null,
     ...overrides,
   };
 }
@@ -36,6 +37,7 @@ function income(overrides: Partial<Income> & Pick<Income, "id" | "type" | "gross
     monthly_pension_contribution: 0,
     monthly_company_car_cost: 0,
     rental_overhead_pct: 0,
+    baseline_gross_amount: null,
     currency: "EUR",
     exchange_rate_to_eur: 1,
     ...overrides,

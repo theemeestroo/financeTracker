@@ -31,3 +31,26 @@ export function splitLabel(
 export function splitPercentageTotal(splits: { percentage: number }[]): number {
   return splits.reduce((sum, s) => sum + s.percentage, 0);
 }
+
+/** Full per-member breakdown of an amount: each split's own percentage
+ *  share, or (when there are no splits at all — a general household item
+ *  with no owner) an even share across `fallbackMemberIds`. Unlike
+ *  `memberShareOfAmount`'s single-member lookup, this always accounts for
+ *  the whole amount — every euro lands on exactly one household member —
+ *  which is what a per-person running balance needs. */
+export function memberSharesOfAmount(
+  amount: number,
+  splits: Split[],
+  fallbackMemberIds: string[]
+): Map<string, number> {
+  const shares = new Map<string, number>();
+  if (splits.length > 0) {
+    for (const s of splits) {
+      shares.set(s.household_member_id, (shares.get(s.household_member_id) ?? 0) + amount * (s.percentage / 100));
+    }
+  } else if (fallbackMemberIds.length > 0) {
+    const even = amount / fallbackMemberIds.length;
+    for (const id of fallbackMemberIds) shares.set(id, (shares.get(id) ?? 0) + even);
+  }
+  return shares;
+}

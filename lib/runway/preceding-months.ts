@@ -51,30 +51,65 @@ export function precedingMonthsSeries(scenario: ResolvedSeveranceScenario): Runw
     months.push(date);
   }
 
+  const householdMemberIds = scenario.householdMemberIds ?? [];
+
   const monthData = months.map((date) => {
     const phase = activeProfileFor(date, scenario.phases);
-    const commitmentItems = monthlyCommitmentItems(phase, date);
-    const incomeItems = monthlyIncomeItems(phase, date, scenario.taxProfileByMember, scenario.taxYear);
+    const { items: commitmentItems, memberDeltas: commitmentMemberDeltas } = monthlyCommitmentItems(
+      phase,
+      date,
+      householdMemberIds
+    );
+    const { items: incomeItems, memberDeltas: incomeMemberDeltas } = monthlyIncomeItems(
+      phase,
+      date,
+      scenario.taxProfileByMember,
+      scenario.taxYear,
+      householdMemberIds
+    );
     const monthlyCost = -commitmentItems.reduce((sum, i) => sum + i.amount, 0);
     const items = [...commitmentItems, ...incomeItems];
     const delta = items.reduce((sum, i) => sum + i.amount, 0);
-    return { date, items, monthlyCost, delta };
+
+    const memberDeltas = new Map<string, number>();
+    for (const [id, amount] of commitmentMemberDeltas) memberDeltas.set(id, (memberDeltas.get(id) ?? 0) + amount);
+    for (const [id, amount] of incomeMemberDeltas) memberDeltas.set(id, (memberDeltas.get(id) ?? 0) + amount);
+
+    return { date, items, monthlyCost, delta, memberDeltas };
   });
 
   let closingBalance = scenario.startingBalance;
+  // Mirrors `closingBalance` above, walked backward the same way — each
+  // member's own share, seeded from an even split of the starting balance
+  // (see project-runway.ts's identical seeding/reasoning).
+  const closingMemberBalances = new Map<string, number>(
+    householdMemberIds.map((id) => [id, householdMemberIds.length > 0 ? closingBalance / householdMemberIds.length : 0])
+  );
+
   const reversed: RunwayPoint[] = [];
   for (let i = monthData.length - 1; i >= 0; i--) {
-    const { date, items, monthlyCost, delta } = monthData[i];
+    const { date, items, monthlyCost, delta, memberDeltas } = monthData[i];
+
+    let balanceByMember: Record<string, number> | undefined;
+    if (householdMemberIds.length > 0) {
+      balanceByMember = {};
+      for (const id of householdMemberIds) balanceByMember[id] = closingMemberBalances.get(id) ?? 0;
+    }
+
     reversed.push({
       date,
       balance: closingBalance,
       monthlyCost,
       breakdown: {
         inflows: items.filter((it) => it.amount > 0),
-        outflows: items.filter((it) => it.amount < 0).map((it) => ({ label: it.label, amount: -it.amount })),
+        outflows: items.filter((it) => it.amount < 0).map((it) => ({ ...it, amount: -it.amount })),
       },
+      balanceByMember,
     });
     closingBalance -= delta;
+    for (const id of householdMemberIds) {
+      closingMemberBalances.set(id, (closingMemberBalances.get(id) ?? 0) - (memberDeltas.get(id) ?? 0));
+    }
   }
 
   return reversed.reverse();

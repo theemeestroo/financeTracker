@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteButton } from "@/components/delete-button";
 import { toMonthlyEquivalent, formatEUR } from "@/lib/finance/frequency";
@@ -76,12 +77,19 @@ export default async function ProfilesPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Living Profiles</h1>
-        <p className="text-sm text-muted-foreground">
-          Alternate cost-of-living setups (e.g. moving abroad, downsizing) you can attach to a
-          severance scenario as a phase.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Living Profiles</h1>
+          <p className="text-sm text-muted-foreground">
+            Alternate cost-of-living setups (e.g. moving abroad, downsizing) you can attach to a
+            severance scenario as a phase.
+          </p>
+        </div>
+        {rows.length >= 2 && (
+          <Button variant="outline" size="sm" render={<Link href="/profiles/compare" />}>
+            Compare
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

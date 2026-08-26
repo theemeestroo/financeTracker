@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { precedingMonthsSeries } from "./preceding-months";
 import type { Split } from "@/lib/finance/splits";
 import type { Commitment, Income, TaxProfile } from "@/lib/types";
-import type { ResolvedIncome, ResolvedSeveranceScenario, SeveranceStream } from "./types";
+import type { ResolvedCommitment, ResolvedIncome, ResolvedSeveranceScenario, SeveranceStream } from "./types";
 
 const taxProfile: TaxProfile = {
   id: "tp1",
@@ -36,6 +36,7 @@ function income(overrides: Partial<Income> & { splits?: Split[] }): ResolvedInco
     monthly_pension_contribution: 0,
     monthly_company_car_cost: 0,
     rental_overhead_pct: 0,
+    baseline_gross_amount: null,
     currency: "EUR",
     exchange_rate_to_eur: 1,
     ...incomeOverrides,
@@ -43,7 +44,8 @@ function income(overrides: Partial<Income> & { splits?: Split[] }): ResolvedInco
   };
 }
 
-function commitment(overrides: Partial<Commitment>): Commitment {
+function commitment(overrides: Partial<Commitment> & { splits?: Split[] }): ResolvedCommitment {
+  const { splits, ...commitmentOverrides } = overrides;
   return {
     id: "c1",
     profile_id: "p1",
@@ -55,7 +57,9 @@ function commitment(overrides: Partial<Commitment>): Commitment {
     start_date: "2020-01-01",
     end_date: null,
     property_id: null,
-    ...overrides,
+    baseline_amount: null,
+    ...commitmentOverrides,
+    splits: splits ?? [],
   };
 }
 
@@ -143,6 +147,24 @@ describe("precedingMonthsSeries", () => {
       mar.breakdown!.inflows.reduce((s, i) => s + i.amount, 0) -
       mar.breakdown!.outflows.reduce((s, i) => s + i.amount, 0);
     expect(feb.balance + marDelta).toBeCloseTo(mar.balance, 5);
+  });
+
+  it("carries each member's own prorated balance backward too, summing to the household total at every point", () => {
+    const points = precedingMonthsSeries({ ...baseScenario, householdMemberIds: ["m1", "m2"] });
+    for (const p of points) {
+      expect((p.balanceByMember?.m1 ?? 0) + (p.balanceByMember?.m2 ?? 0)).toBeCloseTo(p.balance, 5);
+    }
+    // March is the last backfilled month — its closing balance is exactly
+    // startingBalance, split evenly (there's no data attributing the
+    // household's existing savings to one person over another).
+    const mar = points[points.length - 1];
+    expect(mar.balanceByMember?.m1).toBeCloseTo(baseScenario.startingBalance / 2, 5);
+    expect(mar.balanceByMember?.m2).toBeCloseTo(baseScenario.startingBalance / 2, 5);
+  });
+
+  it("omits balanceByMember when the scenario doesn't supply a household roster", () => {
+    const points = precedingMonthsSeries(baseScenario);
+    expect(points[0].balanceByMember).toBeUndefined();
   });
 
   it("returns nothing when today is already at or past the severance start", () => {

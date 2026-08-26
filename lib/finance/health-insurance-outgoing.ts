@@ -5,6 +5,12 @@ import type { Commitment, HouseholdMember } from "@/lib/types";
  *  nullable. The exact value doesn't matter, only that it's early. */
 const ALWAYS_ACTIVE_FROM = "2000-01-01";
 
+/** These virtual rows have no backing `commitment_splits` row (see the
+ *  function doc below) — the id itself is the only record of which member
+ *  it belongs to, so the prefix is factored out here rather than
+ *  duplicated wherever a caller needs to recover that member. */
+const ID_PREFIX = "health-insurance-";
+
 /**
  * Synthesizes a "private health insurance" commitment for every household
  * member who is privately insured, has a premium set, and hasn't opted out
@@ -50,7 +56,7 @@ export function healthInsuranceOutgoings(
         (m.private_health_insurance_monthly_premium ?? 0) > 0
     )
     .map((m) => ({
-      id: `health-insurance-${m.id}`,
+      id: `${ID_PREFIX}${m.id}`,
       profile_id: profileId,
       name: `${m.name} — private health insurance`,
       category: "insurance" as const,
@@ -60,5 +66,15 @@ export function healthInsuranceOutgoings(
       start_date: ALWAYS_ACTIVE_FROM,
       end_date: cutoffByMember?.get(m.id) ?? null,
       property_id: null,
+      baseline_amount: null,
     }));
+}
+
+/** The household member a synthetic commitment from `healthInsuranceOutgoings`
+ *  belongs to — every row is one specific member's own premium, but (being
+ *  unpersisted) it has no `commitment_splits` row to look that up from, so
+ *  callers that need per-member attribution (the runway projection's
+ *  per-person balance) recover it from the id's own convention instead. */
+export function healthInsuranceOutgoingMemberId(commitmentId: string): string {
+  return commitmentId.slice(ID_PREFIX.length);
 }

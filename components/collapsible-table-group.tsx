@@ -17,12 +17,17 @@ export function CollapsibleTableGroup({
   href,
   total,
   colSpan,
+  actions,
   children,
 }: {
   label: string;
   href?: string;
   total: string;
   colSpan: number;
+  /** Rendered in the group header's trailing cell (e.g. a bulk-delete
+   *  button) — click-isolated from the row's own expand/collapse toggle,
+   *  same as the `href` link above. */
+  actions?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -57,7 +62,7 @@ export function CollapsibleTableGroup({
           </span>
         </TableCell>
         <TableCell className="text-right font-semibold tabular-nums">{total}</TableCell>
-        <TableCell />
+        <TableCell onClick={(e) => e.stopPropagation()}>{actions}</TableCell>
       </TableRow>
       {open && children}
     </TableBody>

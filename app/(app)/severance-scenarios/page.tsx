@@ -74,7 +74,10 @@ export default async function SeveranceScenariosPage() {
         .map((s) => memberById.get(s.package.household_member_id) ?? "—")
         .join(", ");
       const scopeTags = summarizeScope(packageSummaries.map((s) => s.package));
-      return { scenario, packageSummaries, runway, totals, memberNames, scopeTags };
+      const depletionByMember = new Map(
+        (runway?.perMember ?? []).map((pm) => [pm.householdMemberId, pm.depletionDate])
+      );
+      return { scenario, packageSummaries, runway, totals, memberNames, scopeTags, depletionByMember };
     })
   );
 
@@ -115,7 +118,7 @@ export default async function SeveranceScenariosPage() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {previews.map(({ scenario, runway, totals, memberNames, scopeTags }) => {
+          {previews.map(({ scenario, runway, totals, memberNames, scopeTags, depletionByMember }) => {
             return (
               <Card key={scenario.id} className="transition-colors hover:bg-muted/50">
                 <Link href={`/severance-scenarios/${scenario.id}`} className="block">
@@ -182,20 +185,34 @@ export default async function SeveranceScenariosPage() {
                             <th scope="col" className="pb-1 text-right font-normal">
                               Net
                             </th>
+                            <th scope="col" className="pb-1 text-right font-normal">
+                              Depletes
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
-                          {totals.severanceByMember.map((p) => (
-                            <tr key={p.householdMemberId}>
-                              <td className="py-0.5">{memberById.get(p.householdMemberId) ?? "—"}</td>
-                              <td className="py-0.5 text-right tabular-nums text-muted-foreground">
-                                {formatEUR(p.gross)}
-                              </td>
-                              <td className="py-0.5 text-right tabular-nums">
-                                {p.net != null ? formatEUR(p.net) : "—"}
-                              </td>
-                            </tr>
-                          ))}
+                          {totals.severanceByMember.map((p) => {
+                            const depletionDate = depletionByMember.get(p.householdMemberId) ?? null;
+                            return (
+                              <tr key={p.householdMemberId}>
+                                <td className="py-0.5">{memberById.get(p.householdMemberId) ?? "—"}</td>
+                                <td className="py-0.5 text-right tabular-nums text-muted-foreground">
+                                  {formatEUR(p.gross)}
+                                </td>
+                                <td className="py-0.5 text-right tabular-nums">
+                                  {p.net != null ? formatEUR(p.net) : "—"}
+                                </td>
+                                <td
+                                  className="py-0.5 text-right tabular-nums"
+                                  style={{
+                                    color: depletionDate ? "var(--status-critical)" : "var(--status-good)",
+                                  }}
+                                >
+                                  {depletionDate ? formatDateDisplay(depletionDate) : "Sustainable"}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     )}

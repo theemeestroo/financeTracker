@@ -19,7 +19,9 @@ export {
   mergeScenarioEvents,
   mergeScenarioSavingsRules,
   mergeScenarioPropertyEnds,
+  mergePhases,
   type MergedScenarioEvent,
   type MergedSavingsRule,
   type MergedPropertyEnd,
+  type MergedPhase,
 } from "./global-items";

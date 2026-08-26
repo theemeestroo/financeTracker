@@ -10,6 +10,7 @@ export type {
   ResolvedSeveranceScenario,
   ResolvedRunwayProfile,
   ResolvedIncome,
+  ResolvedCommitment,
   ResolvedSavingsRule,
   RunwayPhase,
   RunwayEvent,
@@ -17,5 +18,6 @@ export type {
   RunwayLineItem,
   RunwayMonthBreakdown,
   RunwayResult,
+  PerMemberRunway,
   SeveranceStream,
 } from "./types";

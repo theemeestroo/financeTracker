@@ -183,9 +183,53 @@ export async function updateCommitment(
   redirect(redirectTo);
 }
 
+const AdjustAmountSchema = z.object({
+  amount: z.coerce.number().positive({ message: "Amount must be greater than 0." }),
+});
+
+/** Adjusts just a commitment's amount — the profile detail page's control for
+ *  moving a cloned row's value up/down from the `baseline_amount` it was
+ *  cloned at, without touching any of its other fields. */
+export async function adjustCommitmentAmount(
+  id: string,
+  revalidateTarget: string,
+  _prevState: FormState,
+  formData: FormData
+): Promise<FormState> {
+  const validated = AdjustAmountSchema.safeParse({ amount: formData.get("amount") });
+  if (!validated.success) return { error: validated.error.issues[0].message };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("commitments")
+    .update({ amount: validated.data.amount })
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/commitments");
+  revalidatePath(revalidateTarget);
+}
+
 export async function deleteCommitment(id: string, revalidateTarget = "/commitments") {
   const supabase = await createClient();
   await supabase.from("commitments").delete().eq("id", id);
+  revalidatePath("/commitments");
+  revalidatePath(revalidateTarget);
+}
+
+/** Bulk-removes every commitment linked to one property within one profile —
+ *  the Living Profile detail page's "Delete all" action on a property's
+ *  group header. `profile_id` is redundant with `property_id` alone (a
+ *  property already belongs to exactly one profile) but kept as an explicit
+ *  safety scope. */
+export async function deleteCommitmentsByProperty(
+  propertyId: string,
+  profileId: string,
+  revalidateTarget = "/commitments"
+) {
+  const supabase = await createClient();
+  await supabase.from("commitments").delete().eq("property_id", propertyId).eq("profile_id", profileId);
   revalidatePath("/commitments");
   revalidatePath(revalidateTarget);
 }
