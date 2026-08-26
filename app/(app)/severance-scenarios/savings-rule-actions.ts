@@ -55,7 +55,10 @@ async function packageAllocationState(
   const { runwayScenario, packageSummaries } = await resolveScenario(supabase, scenarioRow as SeveranceScenario);
   const summary = packageSummaries.find((s) => s.package.id === packageId);
   if (!summary) return { error: "That person's package could not be found." };
-  const severanceBase = summary.netSeverance ?? summary.severanceGross;
+  // Money isn't investable until it's actually in hand — netAtPayment
+  // (2025+ marginal-rate withholding), not the eventual post-refund
+  // netSeverance figure, which isn't liquid until the following year.
+  const severanceBase = summary.netAtPayment ?? summary.severanceGross;
 
   const alreadyAllocated = (runwayScenario?.savingsRules ?? [])
     .filter((r) => r.householdMemberId === summary.package.household_member_id)

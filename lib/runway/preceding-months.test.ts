@@ -74,6 +74,8 @@ function stream(overrides: Partial<SeveranceStream>): SeveranceStream {
     gardenLeaveGrossMonthly: 0,
     netSeveranceLumpSum: 0,
     severancePaymentDate: "2027-04-15",
+    refundAmount: 0,
+    refundDate: null,
     algMonthlyNet: 0,
     algStartDate: "2027-04-15",
     algEndDate: "2027-04-15",

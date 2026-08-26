@@ -91,6 +91,8 @@ function stream(overrides: Partial<SeveranceStream> = {}): SeveranceStream {
     gardenLeaveGrossMonthly: 0,
     netSeveranceLumpSum: 0,
     severancePaymentDate: gardenLeaveEnd,
+    refundAmount: 0,
+    refundDate: null,
     algMonthlyNet: 0,
     algStartDate: "2026-01-01",
     algEndDate: "2026-01-01",
@@ -175,6 +177,53 @@ describe("projectRunway — lump sum timing", () => {
     // Month 5 (2026-06-01): the lump sum lands on its own schedule.
     expect(result.series[5].date).toBe("2026-06-01");
     expect(result.series[5].balance).toBe(16000);
+  });
+});
+
+describe("projectRunway — Fünftelregelung refund timing", () => {
+  it("lands the refund on its own month, attributed to its own member — not split evenly with the other", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      startingBalance: 0,
+      householdMemberIds: ["m1", "m2"],
+      horizonMonths: 19,
+      severances: [
+        stream({
+          householdMemberId: "m1",
+          netSeveranceLumpSum: 20000,
+          refundAmount: 3000,
+          refundDate: "2027-07-01",
+        }),
+        stream({ householdMemberId: "m2", severanceStartDate: "2026-01-01", netSeveranceLumpSum: 5000 }),
+      ],
+    });
+    const refundPoint = result.series.find((p) => p.date === "2027-07-01");
+    expect(refundPoint?.balance).toBe(20000 + 5000 + 3000);
+    // m1's own refund lands entirely on m1 — not split with m2.
+    const priorPoint = result.series.find((p) => p.date === "2027-06-01");
+    expect((refundPoint?.balanceByMember?.m1 ?? 0) - (priorPoint?.balanceByMember?.m1 ?? 0)).toBeCloseTo(3000, 5);
+    expect(refundPoint?.balanceByMember?.m2).toBeCloseTo(priorPoint?.balanceByMember?.m2 ?? 0, 5);
+  });
+
+  it("silently drops a refund landing beyond the projection horizon", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      horizonMonths: 6, // refund lands month 18 — well beyond this horizon
+      severances: [
+        stream({ netSeveranceLumpSum: 20000, refundAmount: 3000, refundDate: "2027-07-01" }),
+      ],
+    });
+    expect(result.series).toHaveLength(6);
+    expect(result.series.every((p) => p.balance === 20000)).toBe(true);
+  });
+
+  it("a zero refundAmount never produces a line item, even with a refundDate set", () => {
+    const result = projectRunway({
+      ...baseScenario,
+      severances: [stream({ netSeveranceLumpSum: 20000, refundAmount: 0, refundDate: "2026-07-01" })],
+    });
+    const refundPoint = result.series.find((p) => p.date === "2026-07-01");
+    expect(refundPoint?.breakdown?.inflows.some((i) => i.label.includes("refund"))).toBe(false);
   });
 });
 

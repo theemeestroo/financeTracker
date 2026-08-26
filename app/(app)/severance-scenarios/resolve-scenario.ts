@@ -6,7 +6,7 @@ import {
   clampToAvailableTaxYear,
   compareSeverancePaymentTiming,
 } from "@/lib/tax";
-import type { AnnualPersonTaxSummary, AnnualSeveranceTax } from "@/lib/tax";
+import type { AnnualPersonTaxSummary, AnnualSeveranceRefund, AnnualSeveranceTax } from "@/lib/tax";
 import {
   calculateSeverancePackage,
   mergeScenarioEvents,
@@ -121,14 +121,17 @@ export function scenarioTotals(packageSummaries: ScenarioPackageSummary[]): Scen
     null
   );
   const totalGrossSeverance = packageSummaries.reduce((sum, s) => sum + s.severanceGross, 0);
-  const totalNetSeverance = packageSummaries.every((s) => s.netSeverance != null)
-    ? packageSummaries.reduce((sum, s) => sum + (s.netSeverance ?? 0), 0)
+  // "Net" everywhere outside the per-package breakdown card/Tax tab means
+  // money actually in hand — netAtPayment (2025+ marginal-rate withholding),
+  // not the eventual post-refund Fünftelregelung netSeverance figure.
+  const totalNetSeverance = packageSummaries.every((s) => s.netAtPayment != null)
+    ? packageSummaries.reduce((sum, s) => sum + (s.netAtPayment ?? 0), 0)
     : null;
   const algMonthlyNetTotal = packageSummaries.reduce((sum, s) => sum + s.algMonthlyNet, 0);
   const severanceByMember = packageSummaries.map((s) => ({
     householdMemberId: s.package.household_member_id,
     gross: s.severanceGross,
-    net: s.netSeverance,
+    net: s.netAtPayment,
   }));
 
   return { earliestStart, totalGrossSeverance, totalNetSeverance, algMonthlyNetTotal, severanceByMember };
@@ -139,9 +142,30 @@ export type ScenarioPackageSummary = {
   severanceGross: number;
   isOverridden: boolean;
   noticePayGross: number;
-  netSeverance: number | null; // null when the member has no tax profile yet
+  /** Eventual, post-refund total (2025+ law: netAtPayment + refundAmount) —
+   *  what the person ends up with once their tax return is settled. Null
+   *  when the member has no tax profile yet. Not what lands in the account
+   *  at payment time — see `netAtPayment` for that. */
+  netSeverance: number | null;
   taxOnSeverance: number | null;
   taxSaving: number | null;
+  /** What actually lands in the account at the payment date — ordinary
+   *  marginal-rate withholding (2025+ law no longer applies the
+   *  Fünftelregelung discount at source). This is the figure the runway
+   *  projection and every "headline net" display outside the per-package
+   *  breakdown card/Tax tab should use. Null when the member has no tax
+   *  profile yet. */
+  netAtPayment: number | null;
+  totalMarginalTax: number | null;
+  /** The eventual Fünftelregelung refund (income tax + soli + church tax
+   *  combined) — 0 when there's nothing to refund, null when the member
+   *  has no tax profile yet. Lands `refundDate` below, separately from
+   *  `paymentDate`. */
+  refundAmount: number | null;
+  /** Fixed as July 1 of the year after `paymentDate`'s year — simplified
+   *  "tax return processed, refund arrives" timing, not modeled Finanzamt
+   *  processing time. Null exactly when `refundAmount` is null. */
+  refundDate: string | null;
   /** Effective payment date — the package's own severance_payment_date if
    *  set, else gardenLeaveEndDate below. Drives both which tax year the
    *  Fünftelregelung calc uses *and* which month the projection actually
@@ -327,6 +351,10 @@ export async function resolveScenario(
     let netSeverance: number | null = null;
     let taxOnSeverance: number | null = null;
     let taxSaving: number | null = null;
+    let netAtPayment: number | null = null;
+    let totalMarginalTax: number | null = null;
+    let refundAmount: number | null = null;
+    let refundDate: string | null = null;
     let paymentTimingTaxSaving: number | null = null;
     let gardenLeaveNetMonthly: number | null = null;
 
@@ -343,6 +371,12 @@ export async function resolveScenario(
       netSeverance = timing.actual.netSeverance;
       taxOnSeverance = timing.actual.totalTaxOnSeverance;
       taxSaving = timing.actual.taxSaving;
+      netAtPayment = timing.actual.netAtPayment;
+      totalMarginalTax = timing.actual.totalMarginalTax;
+      refundAmount = timing.actual.refundAmount;
+      // Fixed July 1 of the year after payment — simplified "tax return
+      // processed, refund arrives" timing (see ScenarioPackageSummary's own doc).
+      refundDate = `${paymentYear + 1}-07-01`;
       paymentTimingTaxSaving = timing.timingTaxSaving;
 
       if (pkg.include_garden_leave) {
@@ -393,6 +427,10 @@ export async function resolveScenario(
       netSeverance,
       taxOnSeverance,
       taxSaving,
+      netAtPayment,
+      totalMarginalTax,
+      refundAmount,
+      refundDate,
       paymentDate,
       paymentTimingTaxSaving,
       paidAfterEmploymentEnds: paymentYear > departureYear,
@@ -584,7 +622,10 @@ export async function resolveScenario(
     .map((rule) => {
       const summary = packageSummaryById.get(rule.packageId);
       if (!summary) return null; // package deleted out from under an orphaned rule
-      const severanceBase = summary.netSeverance ?? summary.severanceGross;
+      // Money isn't investable until it's actually in hand — netAtPayment
+      // (2025+ marginal-rate withholding), not the eventual post-refund
+      // netSeverance figure, which isn't liquid until the following year.
+      const severanceBase = summary.netAtPayment ?? summary.severanceGross;
       const principal = resolveSavingsPrincipal(rule, severanceBase);
       const memberName = memberById.get(summary.package.household_member_id)?.name ?? "—";
       return {
@@ -607,8 +648,10 @@ export async function resolveScenario(
     noticePeriodMonths: s.package.notice_period_months ?? 0,
     gardenLeaveNetMonthly: s.gardenLeaveNetMonthly ?? s.package.monthly_base_salary ?? 0,
     gardenLeaveGrossMonthly: s.package.monthly_base_salary ?? 0,
-    netSeveranceLumpSum: s.netSeverance ?? s.severanceGross,
+    netSeveranceLumpSum: s.netAtPayment ?? s.severanceGross,
     severancePaymentDate: s.paymentDate,
+    refundAmount: s.refundAmount ?? 0,
+    refundDate: s.refundDate ?? null,
     algMonthlyNet: s.algMonthlyNet,
     algStartDate: s.algStartDate,
     algEndDate: s.algEndDate,
@@ -658,10 +701,11 @@ export async function resolveScenario(
  * scratch, so it always agrees with what the Cash Flow tab already shows:
  * regular income (salary/rental/garden leave/…) via
  * `aggregateAnnualIncomeByMember`, one severance lump sum segment per
- * (person, year) reused as-is from `packageSummaries` (its own
- * Fünftelregelung figures, not retaxed here — already computed against
- * `paymentDate`'s own year, which is also the year this bucketing uses).
- * Takes the already-projected
+ * (person, year) reused as-is from `packageSummaries` — the *marginal*
+ * withholding figures (2025+ law), since that's what actually happened to
+ * cash in the payment year, not retaxed here — plus, in whatever later year
+ * `refundDate` falls in, a separate `severanceRefund` entry for the eventual
+ * Fünftelregelung refund the tax return recovers. Takes the already-projected
  * `runway` rather than a scenario, since the page computes that once via
  * `projectRunway` and both the Cash Flow chart and this need the same run.
  *
@@ -684,18 +728,31 @@ export function buildAnnualTaxSummaries(
   const allIncomePoints = [...precedingMonthsSeries(runwayScenario), ...runway.series];
 
   const severanceByKey = new Map<string, AnnualSeveranceTax>();
+  const refundByKey = new Map<string, AnnualSeveranceRefund>();
   for (const s of packageSummaries) {
-    if (s.netSeverance == null) continue; // no tax profile — nothing to attribute yet
+    if (s.netAtPayment == null) continue; // no tax profile — nothing to attribute yet
     // Taxed in the year it's actually received, not necessarily the year
-    // employment ends — see `paymentDate`'s own comment.
+    // employment ends — see `paymentDate`'s own comment. Uses the marginal
+    // withholding figures (what the employer actually withheld that year),
+    // not the eventual Fünftelregelung ones — see `netAtPayment`'s own doc.
     const year = Number(s.paymentDate.slice(0, 4));
     const key = `${s.package.household_member_id}::${year}`;
     const existing = severanceByKey.get(key) ?? { gross: 0, totalTax: 0, net: 0 };
     severanceByKey.set(key, {
       gross: existing.gross + s.severanceGross,
-      totalTax: existing.totalTax + (s.taxOnSeverance ?? 0),
-      net: existing.net + s.netSeverance,
+      totalTax: existing.totalTax + (s.totalMarginalTax ?? 0),
+      net: existing.net + s.netAtPayment,
     });
+
+    if (s.refundDate && (s.refundAmount ?? 0) > 0) {
+      const refundYear = Number(s.refundDate.slice(0, 4));
+      const refundKey = `${s.package.household_member_id}::${refundYear}`;
+      const existingRefund = refundByKey.get(refundKey);
+      refundByKey.set(refundKey, {
+        amount: (existingRefund?.amount ?? 0) + (s.refundAmount ?? 0),
+        fromYear: year,
+      });
+    }
   }
 
   const seenKeys = new Set<string>();
@@ -717,7 +774,8 @@ export function buildAnnualTaxSummaries(
       entry.taxFreeGross,
       profile,
       severanceByKey.get(key),
-      entry.investmentGross
+      entry.investmentGross,
+      refundByKey.get(key) ?? null
     );
     summaries.push({ ...summary, year: entry.year });
   }
@@ -727,6 +785,29 @@ export function buildAnnualTaxSummaries(
   // the aggregation above wouldn't have produced an entry for that year,
   // so add one covering just the severance.
   for (const [key, severance] of severanceByKey) {
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    const [householdMemberId, yearStr] = key.split("::");
+    const profile = taxProfileByMember.get(householdMemberId);
+    if (!profile) continue;
+    const year = Number(yearStr);
+    const summary = annualPersonTaxSummary(
+      householdMemberId,
+      clampToAvailableTaxYear(year),
+      [],
+      0,
+      profile,
+      severance,
+      0,
+      refundByKey.get(key) ?? null
+    );
+    summaries.push({ ...summary, year });
+  }
+
+  // Same reasoning again, one year later: a refund can land in a year with
+  // no severance event of its own and no other tracked income for that
+  // member (e.g. fully idle before the next job starts).
+  for (const [key, refund] of refundByKey) {
     if (seenKeys.has(key)) continue;
     const [householdMemberId, yearStr] = key.split("::");
     const profile = taxProfileByMember.get(householdMemberId);
@@ -738,7 +819,9 @@ export function buildAnnualTaxSummaries(
       [],
       0,
       profile,
-      severance
+      undefined,
+      0,
+      refund
     );
     summaries.push({ ...summary, year });
   }

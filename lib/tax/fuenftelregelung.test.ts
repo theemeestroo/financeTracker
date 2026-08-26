@@ -43,6 +43,31 @@ describe("calculateSeveranceNet — Fünftelregelung", () => {
   });
 });
 
+describe("calculateSeveranceNet — 2025+ withholding at marginal rate, refund via return", () => {
+  it("netAtPayment (ordinary withholding) is less than netSeverance (Fünftelregelung), and refundAmount recovers the gap", () => {
+    const result = calculateSeveranceNet(120000, 65000, profile, 2025);
+    expect(result.netAtPayment).toBeLessThan(result.netSeverance);
+    expect(result.refundAmount).toBeGreaterThan(0);
+    // The two real cash legs (immediate net + eventual refund) sum back to
+    // the same "ultimate net" Fünftelregelung has always produced.
+    expect(result.netAtPayment + result.refundAmount).toBeCloseTo(result.netSeverance, 5);
+  });
+
+  it("totalMarginalTax is always at least totalTaxOnSeverance (Fünftelregelung is a strict subsidy)", () => {
+    for (const [gross, regular] of [[120000, 65000], [80000, 40000], [50000, 0], [200000, 100000]]) {
+      const result = calculateSeveranceNet(gross, regular, profile, 2025);
+      expect(result.totalMarginalTax).toBeGreaterThanOrEqual(result.totalTaxOnSeverance);
+    }
+  });
+
+  it("a severance of €0 produces no refund and no marginal tax", () => {
+    const result = calculateSeveranceNet(0, 50000, profile, 2025);
+    expect(result.refundAmount).toBe(0);
+    expect(result.totalMarginalTax).toBe(0);
+    expect(result.netAtPayment).toBe(0);
+  });
+});
+
 describe("compareSeverancePaymentTiming", () => {
   const grossSeverance = 100000;
   const monthlyBaseSalary = 8000;

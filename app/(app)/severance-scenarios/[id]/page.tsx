@@ -320,8 +320,11 @@ export default async function ScenarioDetailPage({
     (savingsRuleOverrideRows ?? []) as SeveranceGlobalSavingsRuleOverride[],
     packageIdByMember
   );
+  // Money isn't investable until it's actually in hand — netAtPayment
+  // (2025+ marginal-rate withholding), not the eventual post-refund
+  // netSeverance figure, which isn't liquid until the following year.
   const severanceBaseByPackage = new Map(
-    packageSummaries.map((s) => [s.package.id, s.netSeverance ?? s.severanceGross])
+    packageSummaries.map((s) => [s.package.id, s.netAtPayment ?? s.severanceGross])
   );
   const resolvedAmountByRule = new Map(
     mergedSavingsRules.map((rule) => [
@@ -332,7 +335,7 @@ export default async function ScenarioDetailPage({
   const packageOptions: PackageAllocationOption[] = packageSummaries.map((s) => ({
     id: s.package.id,
     memberName: memberById.get(s.package.household_member_id) ?? "—",
-    severanceBase: s.netSeverance ?? s.severanceGross,
+    severanceBase: s.netAtPayment ?? s.severanceGross,
     alreadyAllocated: mergedSavingsRules
       .filter((r) => r.packageId === s.package.id)
       .reduce((sum, r) => sum + (resolvedAmountByRule.get(r.id) ?? 0), 0),
@@ -347,16 +350,20 @@ export default async function ScenarioDetailPage({
   // Net severance, combined — the direct net counterpart to "Total package"
   // above (falls back to gross for a package whose member has no tax
   // profile yet, same convention the Savings tab's own headroom figures
-  // already use). Per-person split only shown once there's more than one
-  // package — a single person's split would just repeat the headline number.
+  // already use). Uses netAtPayment (2025+ marginal-rate withholding, what's
+  // actually in hand) rather than the eventual post-refund netSeverance
+  // figure — that one's shown, alongside the refund itself, only in the
+  // per-package breakdown card below. Per-person split only shown once
+  // there's more than one package — a single person's split would just
+  // repeat the headline number.
   const totalNetSeverance = packageSummaries.reduce(
-    (sum, s) => sum + (s.netSeverance ?? s.severanceGross),
+    (sum, s) => sum + (s.netAtPayment ?? s.severanceGross),
     0
   );
   const netSeveranceByPerson = packageSummaries
     .map((s) => ({
       name: memberById.get(s.package.household_member_id) ?? "—",
-      net: s.netSeverance ?? s.severanceGross,
+      net: s.netAtPayment ?? s.severanceGross,
     }))
     .map((p) => `${p.name} ${formatEUR(p.net)}`)
     .join(" · ");
@@ -532,15 +539,29 @@ export default async function ScenarioDetailPage({
                 // severance (rather than the household's combined balance,
                 // which could include another person's much larger package)
                 // keeps it a genuinely per-person figure.
+                // A refund at payment-year+1 July can land well past a short
+                // custom horizon (unlike the lump sum, which always lands
+                // early) — the projection silently drops anything beyond its
+                // horizon, so flag that here rather than leave a promised
+                // refund unexplained.
+                const refundWithinHorizon =
+                  packageSummary.refundDate != null &&
+                  (runway?.series.some((p) => p.date === firstOfMonth(packageSummary.refundDate!)) ?? false);
                 const lumpSumMonth = firstOfMonth(packageSummary.paymentDate);
                 const algEndMonth = firstOfMonth(packageSummary.algEndDate);
                 const lumpSumBalance = runway?.series.find((p) => p.date === lumpSumMonth)?.balance ?? null;
                 const algEndBalance = runway?.series.find((p) => p.date === algEndMonth)?.balance ?? null;
                 const householdChangeSinceLumpSum =
                   lumpSumBalance != null && algEndBalance != null ? algEndBalance - lumpSumBalance : null;
+                // Anchored to netAtPayment, not the eventual netSeverance —
+                // householdChangeSinceLumpSum is measured against the real
+                // balance projection, which only ever had netAtPayment (2025+
+                // marginal-rate withholding) land at lumpSumMonth; starting
+                // from the larger post-refund figure instead would overstate
+                // what's left by the refund amount, which hasn't landed yet.
                 const severanceRemainingAfterAlg =
-                  packageSummary.netSeverance != null && householdChangeSinceLumpSum != null
-                    ? packageSummary.netSeverance + householdChangeSinceLumpSum
+                  packageSummary.netAtPayment != null && householdChangeSinceLumpSum != null
+                    ? packageSummary.netAtPayment + householdChangeSinceLumpSum
                     : null;
                 // Payment-timing callout — only shown once the saving/cost
                 // is more than rounding noise, since a €0 result (e.g. the
@@ -550,15 +571,19 @@ export default async function ScenarioDetailPage({
                 const timingSaving = packageSummary.paymentTimingTaxSaving;
                 const showTimingCallout = timingSaving != null && Math.abs(timingSaving) >= 1;
                 const timingCalloutGood = (timingSaving ?? 0) > 0;
+                // These figures are the eventual Fünftelregelung tax
+                // liability under each candidate year — i.e. how much the
+                // *refund* differs by timing, not the immediate net at
+                // payment (which is simply that year's marginal withholding).
                 const timingCalloutText = !showTimingCallout
                   ? null
                   : packageSummary.paidAfterEmploymentEnds
                     ? timingCalloutGood
-                      ? `saves ${formatEUR(timingSaving!)} vs. taking it in ${departureYear}`
-                      : `costs ${formatEUR(-timingSaving!)} more than taking it in ${departureYear} would have`
+                      ? `saves ${formatEUR(timingSaving!)} vs. taking it in ${departureYear} (via the eventual refund)`
+                      : `costs ${formatEUR(-timingSaving!)} more than taking it in ${departureYear} would have (via a smaller refund)`
                     : timingCalloutGood
-                      ? `already saves ${formatEUR(timingSaving!)} vs. deferring to January ${departureYear + 1}`
-                      : `delaying to January ${departureYear + 1} could save ${formatEUR(-timingSaving!)} more`;
+                      ? `already saves ${formatEUR(timingSaving!)} vs. deferring to January ${departureYear + 1} (via the eventual refund)`
+                      : `delaying to January ${departureYear + 1} could save ${formatEUR(-timingSaving!)} more (via a bigger refund)`;
                 return (
                   <Card key={pkg.id}>
                     <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
@@ -604,21 +629,31 @@ export default async function ScenarioDetailPage({
                           </div>
                         </div>
                         <div>
-                          <div className="text-xs text-muted-foreground">Net (Fünftelregelung)</div>
+                          <div className="text-xs text-muted-foreground">Net at payment</div>
                           <div className="text-2xl font-extrabold tabular-nums tracking-tight">
-                            {packageSummary.netSeverance != null
-                              ? formatEUR(packageSummary.netSeverance)
+                            {packageSummary.netAtPayment != null
+                              ? formatEUR(packageSummary.netAtPayment)
                               : "—"}
                           </div>
-                          {packageSummary.taxSaving != null && (
-                            <div className="text-xs text-muted-foreground">
-                              saves {formatEUR(packageSummary.taxSaving)} vs. marginal
-                            </div>
-                          )}
                           {packageSummary.hasTaxProfile && (
                             <div className="text-xs text-muted-foreground">
                               paid {formatDateDisplay(packageSummary.paymentDate)}
                               {!pkg.severance_payment_date && " (default)"}
+                            </div>
+                          )}
+                          {/* 2025+ law: the employer withholds at the ordinary
+                              marginal rate above — the Fünftelregelung benefit
+                              only arrives once the tax return is processed. */}
+                          {packageSummary.refundAmount != null && packageSummary.refundAmount > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              {refundWithinHorizon
+                                ? `+${formatEUR(packageSummary.refundAmount)} refund (Fünftelregelung), ${formatDateDisplay(packageSummary.refundDate!)}`
+                                : "refund lands after this projection's horizon"}
+                            </div>
+                          )}
+                          {packageSummary.netSeverance != null && packageSummary.refundAmount != null && packageSummary.refundAmount > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              {formatEUR(packageSummary.netSeverance)} total after refund
                             </div>
                           )}
                         </div>
@@ -863,14 +898,22 @@ export default async function ScenarioDetailPage({
                           });
                         }
                         rows.push({
-                          item: "Severance lump sum (net)",
+                          item: "Severance lump sum (net at payment)",
                           amount:
-                            s.netSeverance != null
-                              ? formatEUR(s.netSeverance)
+                            s.netAtPayment != null
+                              ? formatEUR(s.netAtPayment)
                               : `${formatEUR(s.severanceGross)} gross`,
                           from: formatDateDisplay(s.paymentDate),
                           to: "—",
                         });
+                        if (s.refundAmount != null && s.refundAmount > 0 && s.refundDate) {
+                          rows.push({
+                            item: "Fünftelregelung refund (tax return)",
+                            amount: `+${formatEUR(s.refundAmount)}`,
+                            from: formatDateDisplay(s.refundDate),
+                            to: "—",
+                          });
+                        }
                         if (s.algMonthlyNet > 0) {
                           rows.push({
                             item: `ALG I (net)${pkg.unemployment_benefit_defer_months > 0 ? ` — paused ${pkg.unemployment_benefit_defer_months}mo` : ""}${s.sperrzeitAtRisk ? " — Sperrzeit shift" : ""}${s.sperrzeitOverridden ? " — Sperrzeit waived" : ""}`,
@@ -1302,6 +1345,14 @@ export default async function ScenarioDetailPage({
                                         Severance tax{" "}
                                         <span className="font-medium text-foreground">
                                           {formatEUR(summary.severance.totalTax)}
+                                        </span>
+                                      </span>
+                                    )}
+                                    {summary.severanceRefund != null && (
+                                      <span>
+                                        Tax refund (severance, {summary.severanceRefund.fromYear}){" "}
+                                        <span className="font-medium text-foreground">
+                                          +{formatEUR(summary.severanceRefund.amount)}
                                         </span>
                                       </span>
                                     )}

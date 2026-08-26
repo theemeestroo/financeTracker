@@ -99,6 +99,17 @@ export type AnnualSeveranceTax = {
   net: number;
 };
 
+/** A Fünftelregelung refund landing in this year, from a severance actually
+ *  paid (and marginal-rate withheld) in a prior year — `fromYear` names
+ *  that origin year for the UI. Kept separate from `AnnualSeveranceTax`
+ *  rather than folded into it, since a refund year often has no severance
+ *  event of its own; see `annualPersonTaxSummary`'s own doc for how it
+ *  still feeds the year's headline totals. */
+export type AnnualSeveranceRefund = {
+  amount: number;
+  fromYear: number;
+};
+
 export type AnnualPersonTaxSummary = {
   householdMemberId: string;
   year: number;
@@ -126,6 +137,13 @@ export type AnnualPersonTaxSummary = {
    *  recomputed here, so this view always agrees with the Cash Flow tab's
    *  own severance figures. */
   severance: AnnualSeveranceTax;
+  /** A Fünftelregelung refund landing in this year from a severance paid in
+   *  a prior year (2025+ law: employers withhold at the marginal rate, the
+   *  benefit only arrives once the tax return is processed) — null when
+   *  none. Reduces `totalTaxAll`/increases `totalNetAll` for the year (see
+   *  `annualPersonTaxSummary`) without inflating `totalGrossAll`, since it
+   *  isn't new gross income. */
+  severanceRefund: AnnualSeveranceRefund | null;
   /** Savings/investment accrual for the year (gross, before Abgeltungsteuer)
    *  and its own flat-tax breakdown — kept out of `taxableIncome`/
    *  `bracketSteps` entirely, since it's a different tax regime (flat
@@ -147,7 +165,10 @@ export type AnnualPersonTaxSummary = {
  * lib/finance/income-gross.ts for the same fix applied month-by-month),
  * that year's severance lump sum (if any) taxed separately via the
  * Fünftelregelung and shown as its own segment (it genuinely isn't taxed
- * the same way as ordinary income), and savings/investment accrual taxed
+ * the same way as ordinary income) — reflecting 2025+ marginal-rate
+ * withholding at payment time, with any later refund from a prior year's
+ * severance folded into this year's totals via `severanceRefund` — and
+ * savings/investment accrual taxed
  * under the flat Abgeltungsteuer (`lib/tax/capital-gains-tax.ts`) — a
  * third, independent regime, so it's neither combined into `taxableIncome`
  * nor treated as ordinary wage income.
@@ -159,7 +180,8 @@ export function annualPersonTaxSummary(
   taxFreeIncome: number,
   profile: TaxProfile,
   severance: AnnualSeveranceTax = { gross: 0, totalTax: 0, net: 0 },
-  investmentIncomeGross = 0
+  investmentIncomeGross = 0,
+  severanceRefund: AnnualSeveranceRefund | null = null
 ): AnnualPersonTaxSummary {
   const totalGrossRegular = incomeSources.reduce((sum, s) => sum + s.grossAnnual, 0);
   const socialContributions =
@@ -191,11 +213,13 @@ export function annualPersonTaxSummary(
     totalTaxRegular,
     netRegular,
     severance,
+    severanceRefund,
     investmentIncomeGross: investment.grossAnnual,
     investmentIncomeTax: investment.totalTax,
     investmentIncomeNet: investment.netAnnual,
     totalGrossAll: totalGrossRegular + severance.gross + taxFreeIncome + investment.grossAnnual,
-    totalTaxAll: totalTaxRegular + severance.totalTax + investment.totalTax,
-    totalNetAll: netRegular + severance.net + taxFreeIncome + investment.netAnnual,
+    totalTaxAll: totalTaxRegular + severance.totalTax + investment.totalTax - (severanceRefund?.amount ?? 0),
+    totalNetAll:
+      netRegular + severance.net + taxFreeIncome + investment.netAnnual + (severanceRefund?.amount ?? 0),
   };
 }

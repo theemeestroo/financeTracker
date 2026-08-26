@@ -219,11 +219,11 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "Garden leave models a notice period (in months) during which the package holder keeps receiving net salary before the severance lump sum and any unemployment benefit begin. The net severance lump sum itself is computed using Fünftelregelung (§34 EStG) — Germany's rule for taxing a one-time lump sum without pushing all of it into the top bracket — see Concepts & disclaimers.",
+        text: "Garden leave models a notice period (in months) during which the package holder keeps receiving net salary before the severance lump sum and any unemployment benefit begin. For severance paid from 1 Jan 2025 onward, the employer withholds tax at the ordinary marginal rate — not the Fünftelregelung (§34 EStG) rate — so \"Net at payment\" is what actually lands in the account at the payment date. The Fünftelregelung benefit (Germany's rule for taxing a one-time lump sum without pushing all of it into the top bracket) is instead claimed via that year's tax return, and shows up here as a separate expected refund the following July — see Concepts & disclaimers.",
       },
       {
         type: "p",
-        text: "\"Work end date\" and \"Severance payment date\" are separate fields, because they often are in real life. Work end date drives garden leave, ALG I timing, and notice pay — it's when employment actually ends. Severance payment date is about both tax and cash flow: German severance is taxed in the calendar year it's received, so paying it in a later tax year — once salary has stopped for the year — can meaningfully lower the tax owed on it, versus taking it immediately; and the projected balance chart moves the lump sum to land exactly on that date too, instead of assuming it arrives the moment garden leave ends. Leave the payment date blank to assume it lands the same month garden leave ends (today's default assumption).",
+        text: "\"Work end date\" and \"Severance payment date\" are separate fields, because they often are in real life. Work end date drives garden leave, ALG I timing, and notice pay — it's when employment actually ends. Severance payment date is about both tax and cash flow: German severance is taxed in the calendar year it's received, so paying it in a later tax year — once salary has stopped for the year — can meaningfully lower the eventual tax owed on it (and so the size of the following year's refund) versus taking it immediately; and the projected balance chart moves the lump sum to land exactly on that date too, instead of assuming it arrives the moment garden leave ends. Leave the payment date blank to assume it lands the same month garden leave ends (today's default assumption).",
       },
       {
         type: "p",
@@ -356,7 +356,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
     slug: "tax-tab",
     title: "Tax tab",
     category: "Severance & redundancy scenarios",
-    summary: "A full annual tax position per person, per year — income by source, the tax bracket ladder, and the severance's own Fünftelregelung.",
+    summary: "A full annual tax position per person, per year — income by source, the tax bracket ladder, and the severance's own marginal withholding and eventual refund.",
     blocks: [
       {
         type: "p",
@@ -364,7 +364,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "The 'Income by tax bracket' bar always shows the full 0–45% German tax ladder, not just the part reached — every band from 0% up to 45% is visible, with the reached ones lit up (showing how much of that band's own range is filled) and the rest greyed out, so you can see both the whole structure and exactly where the income sits on it at a glance. Any severance lump sum landing that year gets its own separate segment at the end, since it's taxed via the Fünftelregelung (a genuinely different mechanism) rather than stacking through the bands like ordinary income.",
+        text: "The 'Income by tax bracket' bar always shows the full 0–45% German tax ladder, not just the part reached — every band from 0% up to 45% is visible, with the reached ones lit up (showing how much of that band's own range is filled) and the rest greyed out, so you can see both the whole structure and exactly where the income sits on it at a glance. Any severance lump sum landing that year gets its own separate segment at the end, shown at the ordinary marginal-rate tax the employer actually withheld (2025+ law) rather than the eventual Fünftelregelung figure. If a prior year's severance refund lands in this year instead (via the tax return, modeled as arriving the following July), it shows up as its own 'Tax refund' chip further down — a reduction in that year's total tax, not new gross income.",
       },
       {
         type: "p",
@@ -425,7 +425,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "Below the chart, a Summary table lists the scenarios as columns and metrics as rows, so it's easy to scan one figure at a time across every scenario — starting balance, gross and net severance (with an indented row for each person's own share directly underneath), tax on severance, tax saved via the Fünftelregelung, garden leave pay, total package, ALG I (amount and duration), health insurance costs, Sperrzeit risk, monthly burn, lowest balance, and the depletion date.",
+        text: "Below the chart, a Summary table lists the scenarios as columns and metrics as rows, so it's easy to scan one figure at a time across every scenario — starting balance, gross and net severance (net meaning what's actually in hand at payment time under 2025+ marginal-rate withholding, with an indented row for each person's own share directly underneath), tax on severance, tax saved via the eventual Fünftelregelung refund, garden leave pay, total package, ALG I (amount and duration), health insurance costs, Sperrzeit risk, monthly burn, lowest balance, and the depletion date — with its own indented row for each person's own depletion date directly underneath, so a scenario whose household total stays sustainable can still show one person running out along the way.",
       },
     ],
   },
@@ -441,7 +441,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
         type: "list",
         items: [
           "Steuerklasse (tax class, I–VI) — determines how much wage tax is withheld from a salary. Roughly: I = single, II = single parent, III/V = a married couple splitting withholding unevenly (III gets more take-home, V less, evening out at tax return time), IV = married with similar earnings, VI = a second job.",
-          "Fünftelregelung (§34 EStG) — the rule for taxing a one-time lump sum like severance: it taxes 1/5 of the lump sum stacked on top of your regular income, takes the extra tax that causes, and multiplies by 5. This avoids the whole lump sum being taxed as if it were your permanent new income level.",
+          "Fünftelregelung (§34 EStG) — the rule for taxing a one-time lump sum like severance: it taxes 1/5 of the lump sum stacked on top of your regular income, takes the extra tax that causes, and multiplies by 5. This avoids the whole lump sum being taxed as if it were your permanent new income level. For severance paid from 1 Jan 2025 onward, the employer no longer applies this at source — they withhold at the ordinary marginal rate, and you claim the Fünftelregelung benefit via that year's tax return, typically as a refund (this app models it landing the following July).",
           "ALG I (Arbeitslosengeld I) — unemployment benefit, roughly 60% of your capped, tax-adjusted net salary (67% with a qualifying child), for a duration based on how long you were insured and your age.",
           "Sperrzeit — a period (commonly 12 weeks) during which ALG I can be withheld if the Agentur für Arbeit decides you contributed to your own unemployment (e.g. an exit with no notice period and an outsized payout).",
           "Statutory severance floor (§1a KSchG) — a rule-of-thumb reference ceiling of 0.5 months' salary per year of service, used both as a common negotiation reference point and as half of this app's Sperrzeit safe-harbor heuristic.",

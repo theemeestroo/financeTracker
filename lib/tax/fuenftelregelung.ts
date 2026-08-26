@@ -14,6 +14,26 @@ export type SeveranceTaxResult = {
   netSeverance: number;
   marginalTax: number; // income tax if taxed as ordinary income in one go, for comparison
   taxSaving: number; // marginalTax - taxOnSeverance (income tax only, pre soli/church)
+  soliOnMarginal: number;
+  churchTaxOnMarginal: number;
+  /** marginalTax + soliOnMarginal + churchTaxOnMarginal — the full ordinary-
+   *  rate withholding a 2025+ employer actually applies at payment time (see
+   *  `netAtPayment` below), as opposed to `totalTaxOnSeverance`'s eventual
+   *  Fünftelregelung liability. */
+  totalMarginalTax: number;
+  /** grossSeverance - totalMarginalTax. What actually lands in the account
+   *  at payment time under 2025+ law: employers no longer apply the
+   *  Fünftelregelung discount at source, so this — not `netSeverance` — is
+   *  the real immediate cash figure. */
+  netAtPayment: number;
+  /** Math.max(0, totalMarginalTax - totalTaxOnSeverance) — the eventual
+   *  refund the tax return recovers once the Finanzamt applies §34 EStG
+   *  (total-tax-inclusive, unlike `taxSaving` which is income-tax only).
+   *  Clamped rather than assumed non-negative: Soli's Milderungszone is a
+   *  piecewise function of the income-tax amount, so it isn't strictly
+   *  monotonic in a way that guarantees totalMarginalTax >= totalTaxOnSeverance
+   *  in every pathological case. */
+  refundAmount: number;
 };
 
 /**
@@ -22,6 +42,17 @@ export type SeveranceTaxResult = {
  * five. This keeps a lump sum from being pushed entirely into the top
  * bracket. `regularTaxableIncome` is the household member's zvE from their
  * *regular* income for the year, excluding the severance itself.
+ *
+ * For severance paid from 1 Jan 2025 onward, the employer no longer applies
+ * this discount when withholding payroll tax — they withhold at the ordinary
+ * marginal rate (`netAtPayment`, `totalMarginalTax`), and the employee
+ * claims the Fünftelregelung benefit via their annual tax return for the
+ * year of payment, with the Finanzamt recalculating under §34 EStG and
+ * (usually) refunding the difference (`refundAmount`). `netSeverance` here
+ * remains the eventual, post-refund total (`netAtPayment + refundAmount`) —
+ * useful as "what you end up with," but callers modeling the actual cash
+ * timeline should use `netAtPayment` for the payment month and land
+ * `refundAmount` separately, later (see `resolve-scenario.ts`).
  */
 export function calculateSeveranceNet(
   grossSeverance: number,
@@ -53,6 +84,15 @@ export function calculateSeveranceNet(
   );
   const marginalTax = Math.max(0, withFull - baseTax);
 
+  const soliOnMarginal = calculateSoli(baseTax + marginalTax, profile.tax_class, year) -
+    calculateSoli(baseTax, profile.tax_class, year);
+  const churchTaxOnMarginal =
+    calculateChurchTax(baseTax + marginalTax, profile, year) -
+    calculateChurchTax(baseTax, profile, year);
+  const totalMarginalTax = marginalTax + soliOnMarginal + churchTaxOnMarginal;
+  const netAtPayment = grossSeverance - totalMarginalTax;
+  const refundAmount = Math.max(0, totalMarginalTax - totalTaxOnSeverance);
+
   return {
     taxOnSeverance,
     soliOnSeverance,
@@ -61,6 +101,11 @@ export function calculateSeveranceNet(
     netSeverance,
     marginalTax,
     taxSaving: marginalTax - taxOnSeverance,
+    soliOnMarginal,
+    churchTaxOnMarginal,
+    totalMarginalTax,
+    netAtPayment,
+    refundAmount,
   };
 }
 

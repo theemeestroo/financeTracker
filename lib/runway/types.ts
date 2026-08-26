@@ -70,6 +70,16 @@ export type SeveranceStream = {
    *  base salary) — garden leave is ordinary wage income, so it feeds the
    *  annual tax summary's regular-income bracket bar. */
   gardenLeaveGrossMonthly: number;
+  /** Fünftelregelung refund (income tax + soli + church tax combined),
+   *  landing later via the household member's own tax return — 0 when none
+   *  (no tax profile, or a €0 severance). A second, independently-timed
+   *  lump sum on this same stream rather than a generic scenario event,
+   *  since it must stay attributed to this one person (an unattributed
+   *  RunwayEvent is split evenly across the whole household — wrong for a
+   *  refund that belongs to one specific person's severance). */
+  refundAmount: number;
+  /** The month the refund lands — null exactly when refundAmount is 0. */
+  refundDate: string | null;
 };
 
 /** One savings/investment rule, fully resolved (amount vs.
@@ -148,9 +158,10 @@ export type RunwayLineItem = {
   householdMemberId?: string;
   /** Gross equivalent of `amount` — undefined for outflows, tax-exempt
    *  income (see `taxExempt`), and income whose tax treatment is handled
-   *  elsewhere (the severance lump sum, resolved via its own
-   *  Fünftelregelung figures). Feeds the progressive wage-tax bracket bar
-   *  unless `investmentIncome` redirects it to the flat-tax bucket instead. */
+   *  elsewhere (the severance lump sum and its later Fünftelregelung
+   *  refund, both resolved via their own tax figures rather than taxed
+   *  again here). Feeds the progressive wage-tax bracket bar unless
+   *  `investmentIncome` redirects it to the flat-tax bucket instead. */
   grossAmount?: number;
   /** True for income that's tax-exempt at the wage-tax level (ALG I) — the
    *  German Progressionsvorbehalt effect (tax-free but still nudges the

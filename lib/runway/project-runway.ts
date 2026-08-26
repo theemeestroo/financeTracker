@@ -42,7 +42,11 @@ function attributeToMember(
  * notice window, then its own net severance lump sum at its own payment
  * month (`severancePaymentDate` — defaults to the same month garden leave
  * ends, but can land later when set separately, e.g. for a tax-year timing
- * choice) — streams run independently and simply sum together. Every month, whichever
+ * choice), then — often a year or more later — its own Fünftelregelung
+ * refund at `refundDate`, if any (2025+ law: the employer withholds at the
+ * ordinary marginal rate, so the Fünftelregelung benefit only arrives once
+ * the tax return is processed) — streams run independently and simply sum
+ * together. Every month, whichever
  * phase's `startDate` is the most recent one at or before that month
  * supplies the active commitments/income — a wholesale profile swap, not an
  * incremental diff. One-off commitments and scenario events land in their
@@ -78,6 +82,9 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
     // above, which still governs garden leave pay/ALG I/health-insurance
     // timing regardless of when the money is actually paid.
     paymentMonth: firstOfMonth(s.severancePaymentDate),
+    // Where the later Fünftelregelung refund lands, if any — independent
+    // month from paymentMonth above, often a year or more later.
+    refundMonth: s.refundDate ? firstOfMonth(s.refundDate) : null,
     algStartMonth: firstOfMonth(s.algStartDate),
     algEndMonth: firstOfMonth(s.algEndDate),
     newJobStartMonth: s.newJobStartDate ? firstOfMonth(s.newJobStartDate) : null,
@@ -170,6 +177,14 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
           householdMemberId: stream.householdMemberId,
         });
         attributeToMember(monthMemberDeltas, stream.householdMemberId, stream.netSeveranceLumpSum, householdMemberIds);
+      }
+      if (stream.refundAmount !== 0 && stream.refundMonth && date === stream.refundMonth) {
+        items.push({
+          label: `${stream.householdMemberName} — Fünftelregelung refund (tax return)`,
+          amount: stream.refundAmount,
+          householdMemberId: stream.householdMemberId,
+        });
+        attributeToMember(monthMemberDeltas, stream.householdMemberId, stream.refundAmount, householdMemberIds);
       }
 
       // ALG I income + post-severance health insurance — both stop the

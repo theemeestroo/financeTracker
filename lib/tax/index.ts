@@ -18,5 +18,6 @@ export {
   type TaxBracketStep,
   type AnnualIncomeSource,
   type AnnualSeveranceTax,
+  type AnnualSeveranceRefund,
   type AnnualPersonTaxSummary,
 } from "./annual-tax-summary";
