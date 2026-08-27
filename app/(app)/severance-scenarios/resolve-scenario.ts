@@ -13,6 +13,7 @@ import {
   mergeScenarioPropertyEnds,
   mergeScenarioSavingsRules,
   mergePhases,
+  resolvePensionDeposit,
 } from "@/lib/severance";
 import {
   alg1DurationMonths,
@@ -51,6 +52,7 @@ import type {
   SeveranceGlobalPhaseOverride,
   SeveranceGlobalPropertyEndOverride,
   SeveranceGlobalSavingsRuleOverride,
+  SeveranceGlobalSettings,
   SeveranceScenario,
   SeveranceScenarioEvent,
   SeveranceScenarioPackage,
@@ -104,11 +106,18 @@ export type ScenarioTotals = {
    *  wrong in a way that isn't visible. */
   totalNetSeverance: number | null;
   algMonthlyNetTotal: number;
-  /** Gross and net attributed to each package's own household member, for
-   *  a per-person breakdown display — `net` is null (not gross-substituted)
-   *  when that member has no tax profile yet, since callers showing gross
-   *  alongside it don't need net silently standing in for it. */
-  severanceByMember: { householdMemberId: string; gross: number; net: number | null }[];
+  /** Gross, pension deposit, and net attributed to each package's own
+   *  household member, for a per-person breakdown display — `net` is null
+   *  (not gross-substituted) when that member has no tax profile yet, since
+   *  callers showing gross alongside it don't need net silently standing in
+   *  for it. `pensionDeposit` is already carved out of `gross` before `net`
+   *  is computed (see ScenarioPackageSummary's own pensionDeposit doc). */
+  severanceByMember: {
+    householdMemberId: string;
+    gross: number;
+    pensionDeposit: number;
+    net: number | null;
+  }[];
 };
 
 /** Shared by the scenario list and compare pages — the small set of
@@ -131,10 +140,17 @@ export function scenarioTotals(packageSummaries: ScenarioPackageSummary[]): Scen
   const severanceByMember = packageSummaries.map((s) => ({
     householdMemberId: s.package.household_member_id,
     gross: s.severanceGross,
+    pensionDeposit: s.pensionDeposit,
     net: s.netAtPayment,
   }));
 
-  return { earliestStart, totalGrossSeverance, totalNetSeverance, algMonthlyNetTotal, severanceByMember };
+  return {
+    earliestStart,
+    totalGrossSeverance,
+    totalNetSeverance,
+    algMonthlyNetTotal,
+    severanceByMember,
+  };
 }
 
 export type ScenarioPackageSummary = {
@@ -142,6 +158,19 @@ export type ScenarioPackageSummary = {
   severanceGross: number;
   isOverridden: boolean;
   noticePayGross: number;
+  /** Amount carved out of this severance and diverted into a company
+   *  pension instead of paid as cash — resolved from this package's own
+   *  override, else the household's global default, else the coded
+   *  fallback (lib/severance/pension-deposit.ts). Already subtracted from
+   *  severanceGross before every tax figure below (netAtPayment,
+   *  netSeverance, totalMarginalTax, refundAmount, …) is computed. */
+  pensionDeposit: number;
+  isPensionDepositOverridden: boolean;
+  /** totalTaxOnSeverance without the pension deposit minus totalTaxOnSeverance
+   *  with it — the Fünftelregelung tax the deposit avoids. Null only when
+   *  there's no tax profile yet (nothing to compare); 0 when pensionDeposit
+   *  is 0. */
+  pensionDepositTaxSaving: number | null;
   /** Eventual, post-refund total (2025+ law: netAtPayment + refundAmount) —
    *  what the person ends up with once their tax return is settled. Null
    *  when the member has no tax profile yet. Not what lands in the account
@@ -237,6 +266,7 @@ export async function resolveScenario(
     { data: globalSavingsRuleRows },
     { data: savingsRuleOverrideRows },
     { data: allIncomeRows },
+    { data: globalSettingsRow },
   ] = await Promise.all([
       supabase
         .from("severance_scenario_packages")
@@ -283,9 +313,13 @@ export async function resolveScenario(
         .select(
           "id, profile_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, currency, exchange_rate_to_eur"
         ),
+      supabase.from("severance_global_settings").select("pension_deposit_default").maybeSingle(),
     ]);
 
   const packages = (packageRows ?? []) as SeveranceScenarioPackage[];
+  const globalPensionDepositDefault =
+    (globalSettingsRow as Pick<SeveranceGlobalSettings, "pension_deposit_default"> | null)
+      ?.pension_deposit_default ?? null;
   const allTaxProfileRows = (taxProfiles ?? []) as TaxProfileRow[];
   const householdMembers = (memberRows ?? []) as HouseholdMember[];
   const memberById = new Map(householdMembers.map((m) => [m.id, m]));
@@ -332,6 +366,18 @@ export async function resolveScenario(
     const memberTaxProfile = taxProfileByMember.get(pkg.household_member_id);
     const packageResult = calculateSeverancePackage(pkg);
 
+    // Carved out of severanceGross before every tax figure below is
+    // computed — the deposited amount never reaches the household as cash,
+    // it goes to the pension instead. severanceGross itself stays
+    // undiminished for display and for the Sperrzeit check further down,
+    // which is about the negotiated package size, not how it's structured.
+    const pensionDeposit = resolvePensionDeposit(
+      packageResult.severanceGross,
+      globalPensionDepositDefault,
+      pkg.pension_deposit_override
+    );
+    const taxableGrossSeverance = packageResult.severanceGross - pensionDeposit;
+
     // Work-end date (garden leave/notice) — computed before the tax block
     // since the payment-date fallback below needs it.
     const naturalAlgStart = pkg.include_garden_leave
@@ -357,10 +403,11 @@ export async function resolveScenario(
     let refundDate: string | null = null;
     let paymentTimingTaxSaving: number | null = null;
     let gardenLeaveNetMonthly: number | null = null;
+    let pensionDepositTaxSaving: number | null = null;
 
     if (memberTaxProfile) {
       const timing = compareSeverancePaymentTiming(
-        packageResult.severanceGross,
+        taxableGrossSeverance,
         pkg.monthly_base_salary ?? 0,
         pkg.annual_bonus,
         nonSalaryAnnualGrossByMember.get(pkg.household_member_id) ?? 0,
@@ -378,6 +425,22 @@ export async function resolveScenario(
       // processed, refund arrives" timing (see ScenarioPackageSummary's own doc).
       refundDate = `${paymentYear + 1}-07-01`;
       paymentTimingTaxSaving = timing.timingTaxSaving;
+
+      // How much Fünftelregelung tax the deposit itself avoids — same
+      // timing (departureYear/paymentYear), just against the undiminished
+      // severance instead of taxableGrossSeverance. 0 when pensionDeposit
+      // is 0, since the two bases are then identical.
+      const timingWithoutDeposit = compareSeverancePaymentTiming(
+        packageResult.severanceGross,
+        pkg.monthly_base_salary ?? 0,
+        pkg.annual_bonus,
+        nonSalaryAnnualGrossByMember.get(pkg.household_member_id) ?? 0,
+        memberTaxProfile,
+        departureYear,
+        paymentYear
+      );
+      pensionDepositTaxSaving =
+        timingWithoutDeposit.actual.totalTaxOnSeverance - timing.actual.totalTaxOnSeverance;
 
       if (pkg.include_garden_leave) {
         gardenLeaveNetMonthly = calculateNetIncome(
@@ -424,6 +487,9 @@ export async function resolveScenario(
       severanceGross: packageResult.severanceGross,
       isOverridden: packageResult.isOverridden,
       noticePayGross: packageResult.noticePay,
+      pensionDeposit,
+      isPensionDepositOverridden: pkg.pension_deposit_override != null,
+      pensionDepositTaxSaving,
       netSeverance,
       taxOnSeverance,
       taxSaving,
@@ -625,7 +691,7 @@ export async function resolveScenario(
       // Money isn't investable until it's actually in hand — netAtPayment
       // (2025+ marginal-rate withholding), not the eventual post-refund
       // netSeverance figure, which isn't liquid until the following year.
-      const severanceBase = summary.netAtPayment ?? summary.severanceGross;
+      const severanceBase = summary.netAtPayment ?? summary.severanceGross - summary.pensionDeposit;
       const principal = resolveSavingsPrincipal(rule, severanceBase);
       const memberName = memberById.get(summary.package.household_member_id)?.name ?? "—";
       return {
@@ -648,7 +714,7 @@ export async function resolveScenario(
     noticePeriodMonths: s.package.notice_period_months ?? 0,
     gardenLeaveNetMonthly: s.gardenLeaveNetMonthly ?? s.package.monthly_base_salary ?? 0,
     gardenLeaveGrossMonthly: s.package.monthly_base_salary ?? 0,
-    netSeveranceLumpSum: s.netAtPayment ?? s.severanceGross,
+    netSeveranceLumpSum: s.netAtPayment ?? s.severanceGross - s.pensionDeposit,
     severancePaymentDate: s.paymentDate,
     refundAmount: s.refundAmount ?? 0,
     refundDate: s.refundDate ?? null,

@@ -57,8 +57,10 @@ async function packageAllocationState(
   if (!summary) return { error: "That person's package could not be found." };
   // Money isn't investable until it's actually in hand — netAtPayment
   // (2025+ marginal-rate withholding), not the eventual post-refund
-  // netSeverance figure, which isn't liquid until the following year.
-  const severanceBase = summary.netAtPayment ?? summary.severanceGross;
+  // netSeverance figure, which isn't liquid until the following year — and
+  // never the amount diverted into a pension, which never reaches the
+  // household as cash at all.
+  const severanceBase = summary.netAtPayment ?? summary.severanceGross - summary.pensionDeposit;
 
   const alreadyAllocated = (runwayScenario?.savingsRules ?? [])
     .filter((r) => r.householdMemberId === summary.package.household_member_id)

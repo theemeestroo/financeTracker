@@ -25,3 +25,4 @@ export {
   type MergedPropertyEnd,
   type MergedPhase,
 } from "./global-items";
+export { SEVERANCE_PENSION_DEPOSIT_DEFAULT, resolvePensionDeposit } from "./pension-deposit";

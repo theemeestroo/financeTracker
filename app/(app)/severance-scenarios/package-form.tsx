@@ -6,6 +6,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
+import { formatEUR } from "@/lib/finance/frequency";
 import {
   SEVERANCE_MULTIPLIER_PRESETS,
   type HouseholdMember,
@@ -24,10 +25,15 @@ export function PackageForm({
   action,
   members,
   defaultValues,
+  globalPensionDepositDefault,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   members: HouseholdMember[];
   defaultValues?: Partial<SeveranceScenarioPackage>;
+  /** The household's currently resolved global pension-deposit default
+   *  (already falls back to the coded default upstream) — shown as this
+   *  field's placeholder so leaving it blank visibly means "use this". */
+  globalPensionDepositDefault: number;
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
   const [multiplier, setMultiplier] = useState(defaultValues?.severance_multiplier ?? 1.5);
@@ -306,6 +312,25 @@ export function PackageForm({
               className="max-w-64"
             />
           )}
+        </div>
+
+        <div className="mt-4 flex flex-col gap-1.5 border-t pt-4">
+          <Label htmlFor="pension_deposit_override">Pension deposit from this severance (EUR)</Label>
+          <Input
+            id="pension_deposit_override"
+            name="pension_deposit_override"
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder={`Defaults to the global rule (${formatEUR(globalPensionDepositDefault)})`}
+            defaultValue={defaultValues?.pension_deposit_override ?? undefined}
+            className="max-w-80"
+          />
+          <span className="text-xs text-muted-foreground">
+            Carved out of the gross severance and paid into a company pension instead of as cash —
+            reduces the taxable severance base. Leave blank to use the global rule, or enter 0 to skip a
+            pension deposit for this package.
+          </span>
         </div>
       </div>
 

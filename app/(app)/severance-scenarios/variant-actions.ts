@@ -135,6 +135,7 @@ export async function generateScenarioVariants(
         months_insured_override: p.months_insured_override,
         new_job_start_date: p.new_job_start_date,
         sperrzeit_safe_confirmed: p.sperrzeit_safe_confirmed,
+        pension_deposit_override: p.pension_deposit_override,
       }))
     );
 

@@ -220,6 +220,7 @@ One row per household member taking severance within a scenario — the per-pers
 | `months_insured_override` | numeric(4,1) | nullable | — | overrides the insured-months figure feeding ALG I duration |
 | `new_job_start_date` | date | nullable | — | re-employment date; ends ALG I/health-gap modeling for this person |
 | `sperrzeit_safe_confirmed` | boolean | not null | `false` | user's own assertion that the exit agreement's wording avoids a Sperrzeit, bypassing the heuristic in `lib/unemployment/sperrzeit.ts` |
+| `pension_deposit_override` | numeric(10,2) | nullable | — | this package's own override of the household's global pension-deposit default (`severance_global_settings`, below) — an amount carved out of this severance and diverted into a company pension instead of paid as cash. Null means "use the resolved global default"; 0 means this package explicitly opts out. Distinct from `monthly_pension_contribution` above, which is an ongoing salary deferral, not a one-off severance carve-out — see `lib/severance/pension-deposit.ts`'s `resolvePensionDeposit` |
 | `created_at` | timestamptz | not null | `now()` | |
 
 Unique on `(scenario_id, household_member_id)`. Indexes on `scenario_id`, `household_member_id`. Standard 4 owner-only RLS policies.
@@ -361,6 +362,17 @@ Same `suppressed`/`orphaned_item_name`/`stale_since` shape as `severance_global_
 
 **Deletion behavior:** deleting a global event/rule/property-end/phase does **not** delete its override rows — `ON DELETE SET NULL` (not cascade) means the delete action snapshots `orphaned_item_name`/`stale_since` onto them first, then the FK nulls `global_event_id`/`global_rule_id`/`global_property_end_id`/`global_phase_id` automatically, surfacing them under "Needs review" on `/global-rules` instead of silently vanishing. Deleting a *scenario* still cascades its own override rows (via `scenario_id`) — that data genuinely stops mattering once the scenario is gone.
 
+### `severance_global_settings` — a deliberate exception to the pattern above
+
+The pension-deposit-from-severance feature (a household-wide default amount diverted from each severance into a company pension, overridable per package — `severance_scenario_packages.pension_deposit_override` above) is **not** modeled with the list-of-items + separate-override-table pattern the four tables above use. There's exactly one deposit amount per package, not an arbitrary collection to list/add/delete, so the heavier machinery (a global item table, an override table, `suppressed`/`orphaned_item_name`/`stale_since` tracking) doesn't apply — a single settings row plus a direct nullable override column is enough.
+
+| Column | Type | Nullable | Default | Notes |
+|---|---|---|---|---|
+| `user_id` | uuid | not null | `auth.uid()` | PK, FK cascade — one row per user |
+| `pension_deposit_default` | numeric(10,2) | nullable | — | the household's global default; null means "use the coded fallback" (`lib/severance/pension-deposit.ts`'s `SEVERANCE_PENSION_DEPOSIT_DEFAULT`, €49,000) rather than a value the household has explicitly chosen |
+
+No seed/backfill — the `/global-rules` settings form upserts this row (`onConflict: "user_id"`) the first time a household changes the default. Standard select/insert/update owner-only RLS policies (no delete — a settings row is never removed independently). Resolution order, per package: `pension_deposit_override` (if set) → `pension_deposit_default` (if the row exists and is set) → `SEVERANCE_PENSION_DEPOSIT_DEFAULT`.
+
 ## Reference / seed data tables
 
 Both tables below are global (no `user_id`), RLS-enabled with **only** a `select`-for-`authenticated` policy — rows can only be written via a migration (service role bypasses RLS). Application code reads its working parameters directly from TypeScript (`lib/tax/parameters.ts`, `lib/unemployment/parameters.ts`), **not** from these tables — they're a durable, queryable mirror for reference/audit/future-admin-UI purposes, not the live read path. Keep them in sync with the TypeScript constants when either changes.
@@ -488,6 +500,7 @@ severance_scenario_phases (scope="global", scenario_id null) ──> living_prof
 
 tax_year_parameters (global reference, keyed by year)
 unemployment_benefit_parameters (global reference, keyed by year)
+severance_global_settings (one row per user — pension_deposit_default)
 ```
 
 **ON DELETE behavior worth remembering:**

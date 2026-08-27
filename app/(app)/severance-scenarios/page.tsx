@@ -183,6 +183,9 @@ export default async function SeveranceScenariosPage() {
                               Gross
                             </th>
                             <th scope="col" className="pb-1 text-right font-normal">
+                              Pension
+                            </th>
+                            <th scope="col" className="pb-1 text-right font-normal">
                               Net
                             </th>
                             <th scope="col" className="pb-1 text-right font-normal">
@@ -198,6 +201,9 @@ export default async function SeveranceScenariosPage() {
                                 <td className="py-0.5">{memberById.get(p.householdMemberId) ?? "—"}</td>
                                 <td className="py-0.5 text-right tabular-nums text-muted-foreground">
                                   {formatEUR(p.gross)}
+                                </td>
+                                <td className="py-0.5 text-right tabular-nums text-muted-foreground">
+                                  {formatEUR(p.pensionDeposit)}
                                 </td>
                                 <td className="py-0.5 text-right tabular-nums">
                                   {p.net != null ? formatEUR(p.net) : "—"}

@@ -302,6 +302,24 @@ export type SeveranceScenarioPackage = {
    *  so ALG I is modeled starting right after garden leave/notice ends
    *  instead of being shifted by the heuristic 12-week risk flag. */
   sperrzeit_safe_confirmed: boolean;
+  /** This package's own override of the household's global pension-deposit
+   *  default (see SeveranceGlobalSettings) — an amount carved out of this
+   *  severance and diverted into a company pension instead of paid as cash,
+   *  reducing the taxable severance base (lib/severance/pension-deposit.ts's
+   *  resolvePensionDeposit). Null means "use the global default"; 0 means
+   *  this package explicitly opts out. Distinct from monthly_pension_contribution
+   *  above, which is an ongoing salary deferral, not a one-off severance carve-out. */
+  pension_deposit_override: number | null;
+};
+
+/** Household-wide default for the pension-deposit-from-severance feature —
+ *  one row per user (see SeveranceScenarioPackage's own pension_deposit_override
+ *  for the per-package supersede). Null means "use the coded fallback"
+ *  (lib/severance/pension-deposit.ts's SEVERANCE_PENSION_DEPOSIT_DEFAULT)
+ *  rather than a value the household has explicitly chosen. */
+export type SeveranceGlobalSettings = {
+  user_id: string;
+  pension_deposit_default: number | null;
 };
 
 export type SavingsAllocationType = "amount" | "percentage";

@@ -42,6 +42,7 @@ import {
   mergeScenarioPropertyEnds,
   mergeScenarioSavingsRules,
   mergePhases,
+  SEVERANCE_PENSION_DEPOSIT_DEFAULT,
 } from "@/lib/severance";
 import {
   addScenarioEvent,
@@ -114,6 +115,7 @@ import type {
   SeveranceGlobalPhaseOverride,
   SeveranceGlobalPropertyEndOverride,
   SeveranceGlobalSavingsRuleOverride,
+  SeveranceGlobalSettings,
   SeveranceScenario,
   SeveranceScenarioEvent,
   SeveranceScenarioPackage,
@@ -190,6 +192,7 @@ export default async function ScenarioDetailPage({
     { data: savingsRuleRows },
     { data: globalSavingsRuleRows },
     { data: savingsRuleOverrideRows },
+    { data: globalSettingsRow },
   ] = await Promise.all([
     supabase.from("severance_scenarios").select("*").eq("id", id).single(),
     supabase.from("household_members").select("id, name, created_at"),
@@ -229,9 +232,14 @@ export default async function ScenarioDetailPage({
       .order("created_at"),
     supabase.from("severance_scenario_savings_rules").select("*").eq("scope", "global").order("created_at"),
     supabase.from("severance_global_savings_rule_overrides").select("*").eq("scenario_id", id),
+    supabase.from("severance_global_settings").select("pension_deposit_default").maybeSingle(),
   ]);
 
   if (!scenario) notFound();
+
+  const globalPensionDepositDefault =
+    (globalSettingsRow as Pick<SeveranceGlobalSettings, "pension_deposit_default"> | null)
+      ?.pension_deposit_default ?? SEVERANCE_PENSION_DEPOSIT_DEFAULT;
 
   const typedScenario = scenario as SeveranceScenario;
   const memberById = new Map(
@@ -324,7 +332,7 @@ export default async function ScenarioDetailPage({
   // (2025+ marginal-rate withholding), not the eventual post-refund
   // netSeverance figure, which isn't liquid until the following year.
   const severanceBaseByPackage = new Map(
-    packageSummaries.map((s) => [s.package.id, s.netAtPayment ?? s.severanceGross])
+    packageSummaries.map((s) => [s.package.id, s.netAtPayment ?? s.severanceGross - s.pensionDeposit])
   );
   const resolvedAmountByRule = new Map(
     mergedSavingsRules.map((rule) => [
@@ -335,7 +343,7 @@ export default async function ScenarioDetailPage({
   const packageOptions: PackageAllocationOption[] = packageSummaries.map((s) => ({
     id: s.package.id,
     memberName: memberById.get(s.package.household_member_id) ?? "—",
-    severanceBase: s.netAtPayment ?? s.severanceGross,
+    severanceBase: s.netAtPayment ?? s.severanceGross - s.pensionDeposit,
     alreadyAllocated: mergedSavingsRules
       .filter((r) => r.packageId === s.package.id)
       .reduce((sum, r) => sum + (resolvedAmountByRule.get(r.id) ?? 0), 0),
@@ -357,13 +365,13 @@ export default async function ScenarioDetailPage({
   // there's more than one package — a single person's split would just
   // repeat the headline number.
   const totalNetSeverance = packageSummaries.reduce(
-    (sum, s) => sum + (s.netAtPayment ?? s.severanceGross),
+    (sum, s) => sum + (s.netAtPayment ?? s.severanceGross - s.pensionDeposit),
     0
   );
   const netSeveranceByPerson = packageSummaries
     .map((s) => ({
       name: memberById.get(s.package.household_member_id) ?? "—",
-      net: s.netAtPayment ?? s.severanceGross,
+      net: s.netAtPayment ?? s.severanceGross - s.pensionDeposit,
     }))
     .map((p) => `${p.name} ${formatEUR(p.net)}`)
     .join(" · ");
@@ -427,6 +435,7 @@ export default async function ScenarioDetailPage({
           <PackageForm
             action={addScenarioPackage.bind(null, id)}
             members={(members ?? []) as HouseholdMember[]}
+            globalPensionDepositDefault={globalPensionDepositDefault}
           />
         </AddDisclosure>
       ) : (
@@ -627,6 +636,16 @@ export default async function ScenarioDetailPage({
                               </Badge>
                             )}
                           </div>
+                          {packageSummary.pensionDeposit > 0 && (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              → {formatEUR(packageSummary.pensionDeposit)} to company pension
+                              {!packageSummary.isPensionDepositOverridden && " (default)"}
+                              {packageSummary.pensionDepositTaxSaving != null &&
+                                packageSummary.pensionDepositTaxSaving >= 1 && (
+                                  <>, saves {formatEUR(packageSummary.pensionDepositTaxSaving)} tax</>
+                                )}
+                            </div>
+                          )}
                         </div>
                         <div>
                           <div className="text-xs text-muted-foreground">Net at payment</div>
@@ -826,6 +845,7 @@ export default async function ScenarioDetailPage({
                 <PackageForm
                   action={addScenarioPackage.bind(null, id)}
                   members={(members ?? []) as HouseholdMember[]}
+                  globalPensionDepositDefault={globalPensionDepositDefault}
                 />
               </AddDisclosure>
 
@@ -902,7 +922,7 @@ export default async function ScenarioDetailPage({
                           amount:
                             s.netAtPayment != null
                               ? formatEUR(s.netAtPayment)
-                              : `${formatEUR(s.severanceGross)} gross`,
+                              : `${formatEUR(s.severanceGross - s.pensionDeposit)} gross`,
                           from: formatDateDisplay(s.paymentDate),
                           to: "—",
                         });

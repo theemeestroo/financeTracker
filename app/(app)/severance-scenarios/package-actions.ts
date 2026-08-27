@@ -33,6 +33,7 @@ const PackageSchema = z.object({
   months_insured_override: z.coerce.number().min(0).optional(),
   new_job_start_date: z.string().optional(),
   sperrzeit_safe_confirmed: z.boolean().default(false),
+  pension_deposit_override: z.coerce.number().min(0).optional(),
 });
 
 function parsePackageForm(formData: FormData) {
@@ -61,6 +62,7 @@ function parsePackageForm(formData: FormData) {
     months_insured_override: formData.get("months_insured_override") || undefined,
     new_job_start_date: formData.get("new_job_start_date") || undefined,
     sperrzeit_safe_confirmed: formData.get("sperrzeit_safe_confirmed") === "on",
+    pension_deposit_override: formData.get("pension_deposit_override") || undefined,
   });
 }
 
@@ -90,6 +92,7 @@ function toRow(data: z.infer<typeof PackageSchema>) {
     months_insured_override: data.months_insured_override ?? null,
     new_job_start_date: data.new_job_start_date || null,
     sperrzeit_safe_confirmed: data.sperrzeit_safe_confirmed,
+    pension_deposit_override: data.pension_deposit_override ?? null,
   };
 }
 

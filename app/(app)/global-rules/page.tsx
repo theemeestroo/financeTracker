@@ -4,6 +4,7 @@ import {
   CalendarClock,
   CalendarRange,
   Home,
+  Landmark,
   Pencil,
   PiggyBank,
   Plus,
@@ -14,6 +15,9 @@ import { addGlobalEvent, deleteGlobalEvent } from "./event-actions";
 import { addGlobalSavingsRule, deleteGlobalSavingsRule } from "./savings-rule-actions";
 import { addGlobalPropertyEnd, deleteGlobalPropertyEnd } from "./property-end-actions";
 import { addGlobalPhase, deleteGlobalPhase } from "./phase-actions";
+import { updateGlobalPensionDepositDefault } from "./pension-deposit-actions";
+import { PensionDepositForm } from "./pension-deposit-form";
+import { SEVERANCE_PENSION_DEPOSIT_DEFAULT } from "@/lib/severance";
 import { dismissStaleEventOverride } from "../severance-scenarios/event-actions";
 import { dismissStaleSavingsRuleOverride } from "../severance-scenarios/savings-rule-actions";
 import { dismissStalePropertyEndOverride } from "../severance-scenarios/property-end-actions";
@@ -40,6 +44,7 @@ import {
   type SeveranceGlobalPhaseOverride,
   type SeveranceGlobalPropertyEndOverride,
   type SeveranceGlobalSavingsRuleOverride,
+  type SeveranceGlobalSettings,
   type SeveranceScenario,
   type SeveranceScenarioEvent,
   type SeveranceScenarioPhase,
@@ -63,6 +68,7 @@ export default async function GlobalRulesPage() {
     { data: staleSavingsRuleOverrideRows },
     { data: stalePropertyEndOverrideRows },
     { data: stalePhaseOverrideRows },
+    { data: globalSettingsRow },
   ] = await Promise.all([
     supabase.from("severance_scenario_events").select("*").eq("scope", "global").order("date"),
     supabase
@@ -88,6 +94,7 @@ export default async function GlobalRulesPage() {
     supabase.from("severance_global_savings_rule_overrides").select("*").not("stale_since", "is", null),
     supabase.from("severance_global_property_end_overrides").select("*").not("stale_since", "is", null),
     supabase.from("severance_global_phase_overrides").select("*").not("stale_since", "is", null),
+    supabase.from("severance_global_settings").select("pension_deposit_default").maybeSingle(),
   ]);
 
   const events = (eventRows ?? []) as SeveranceScenarioEvent[];
@@ -110,6 +117,9 @@ export default async function GlobalRulesPage() {
     staleSavingsRuleOverrides.length > 0 ||
     stalePropertyEndOverrides.length > 0 ||
     stalePhaseOverrides.length > 0;
+  const pensionDepositDefault =
+    (globalSettingsRow as Pick<SeveranceGlobalSettings, "pension_deposit_default"> | null)
+      ?.pension_deposit_default ?? SEVERANCE_PENSION_DEPOSIT_DEFAULT;
 
   return (
     <div className="flex flex-col gap-6">
@@ -467,6 +477,26 @@ export default async function GlobalRulesPage() {
           <AddDisclosure label="Add global savings rule" icon={Plus}>
             <SavingsRuleForm action={addGlobalSavingsRule} packages={[]} householdMembers={members} fixedScope="global" />
           </AddDisclosure>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            <TitleIcon icon={Landmark} accent="var(--series-3)" />
+            Pension deposit from severance
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <p className="text-sm text-muted-foreground">
+            Default amount diverted from each severance into a company pension instead of paid as cash —
+            reduces the taxable severance base for the Fünftelregelung calculation. Applies to every
+            severance package unless that package sets its own amount from its edit form.
+          </p>
+          <PensionDepositForm
+            action={updateGlobalPensionDepositDefault}
+            defaultValue={pensionDepositDefault}
+          />
         </CardContent>
       </Card>
 

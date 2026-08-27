@@ -230,6 +230,10 @@ export const HELP_ARTICLES: HelpArticle[] = [
         text: "Whenever the chosen payment date makes a real difference, the package card shows a \"Payment timing\" callout: a confirmed saving (green) when the payment already lands in a later tax year than employment ends, or a suggestion (amber) — \"delaying to January <year> could save €X more\" — when it's still scheduled within the departure year. The figure compares the two sides of that calendar-year boundary directly, so it's specific to your own numbers, not a generic rule of thumb.",
       },
       { type: "p", text: "The employment start date also drives a pension Wartezeit view — a timeline of departure-timing options around Germany's 5-year statutory pension qualifying period." },
+      {
+        type: "p",
+        text: "A package can also carve out part of its gross severance and divert it into a company pension (bAV/Entgeltumwandlung) instead of taking it as cash — this reduces the taxable severance base, so it lowers the tax owed as well as the cash that lands in the account. It defaults to a global amount (set on Global Rules, itself defaulting to roughly €49,000, the tax-free ceiling) that applies to every package; enter your own figure on a package's edit form to override it just for that person, or enter 0 to skip a pension deposit for this package entirely.",
+      },
     ],
   },
   {
@@ -536,6 +540,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
           "Scenario checklist — addChecklistItem, toggleChecklistItem, deleteChecklistItem.",
           "Savings & investment rules — addSavingsRule (re-validates the target package's own headroom server-side, not just in the form), deleteSavingsRule, setSavingsRuleOverride/clearSavingsRuleOverride/duplicateGlobalSavingsRuleIntoScenario/dismissStaleSavingsRuleOverride.",
           "Global events & rules — addGlobalEvent/updateGlobalEvent/deleteGlobalEvent, addGlobalPhase/updateGlobalPhase/deleteGlobalPhase, addGlobalSavingsRule/updateGlobalSavingsRule/deleteGlobalSavingsRule, addGlobalPropertyEnd/updateGlobalPropertyEnd/deleteGlobalPropertyEnd: the shared objects behind Global Rules, edited independently of any scenario. Deleting one flags (doesn't delete) any scenario override tied to it.",
+          "Global pension deposit default — updateGlobalPensionDepositDefault: a single household-wide setting (not a list), upserted rather than added/deleted — every package resolves against it unless it sets its own pension_deposit_override.",
           "Scenario variants — generateScenarioVariants: bulk-creates several derived scenarios (different job-search timing assumptions) in one step.",
         ],
       },
