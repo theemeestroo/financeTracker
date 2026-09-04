@@ -41,3 +41,13 @@ export function formatCurrency(amount: number, currency: Currency): string {
 export function formatEUR(amount: number): string {
   return formatCurrency(amount, "EUR");
 }
+
+/**
+ * Compact EUR for dense card/list views: rounds to the nearest €1,000 and
+ * renders as e.g. "346k €" (345.678 → 346k). Use only where the exact
+ * figure isn't needed — detail pages keep the full `formatEUR`.
+ */
+export function formatEURThousands(amount: number): string {
+  const thousands = Math.round(amount / 1000) || 0;
+  return `${new Intl.NumberFormat("de-DE").format(thousands)}k €`;
+}

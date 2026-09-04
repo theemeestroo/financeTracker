@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteButton } from "@/components/delete-button";
-import { formatEUR } from "@/lib/finance/frequency";
+import { formatEURThousands } from "@/lib/finance/frequency";
 import { formatDateDisplay } from "@/lib/finance/date-utils";
 import type { HouseholdMember, SeveranceScenario, SeveranceScenarioPackage } from "@/lib/types";
 
@@ -163,13 +163,13 @@ export default async function SeveranceScenariosPage() {
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground">Net severance</span>
                       <span className="font-semibold tabular-nums">
-                        {totals.totalNetSeverance != null ? formatEUR(totals.totalNetSeverance) : "—"}
+                        {totals.totalNetSeverance != null ? formatEURThousands(totals.totalNetSeverance) : "—"}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground">Gross severance</span>
                       <span className="tabular-nums text-muted-foreground">
-                        {formatEUR(totals.totalGrossSeverance)}
+                        {formatEURThousands(totals.totalGrossSeverance)}
                       </span>
                     </div>
                     {totals.severanceByMember.length > 1 && (
@@ -200,13 +200,13 @@ export default async function SeveranceScenariosPage() {
                               <tr key={p.householdMemberId}>
                                 <td className="py-0.5">{memberById.get(p.householdMemberId) ?? "—"}</td>
                                 <td className="py-0.5 text-right tabular-nums text-muted-foreground">
-                                  {formatEUR(p.gross)}
+                                  {formatEURThousands(p.gross)}
                                 </td>
                                 <td className="py-0.5 text-right tabular-nums text-muted-foreground">
-                                  {formatEUR(p.pensionDeposit)}
+                                  {formatEURThousands(p.pensionDeposit)}
                                 </td>
                                 <td className="py-0.5 text-right tabular-nums">
-                                  {p.net != null ? formatEUR(p.net) : "—"}
+                                  {p.net != null ? formatEURThousands(p.net) : "—"}
                                 </td>
                                 <td
                                   className="py-0.5 text-right tabular-nums"
