@@ -14,6 +14,21 @@ import {
 } from "@/lib/types";
 import type { FormState } from "./package-actions";
 
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
 const TOGGLE_PRESETS = [
   { label: "Base only", bonus: false, car: false, garden: false },
   { label: "+ Garden leave", bonus: false, car: false, garden: true },
@@ -127,6 +142,25 @@ export function PackageForm({
               min="0"
               defaultValue={defaultValues?.annual_bonus ?? 0}
             />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="annual_bonus_payment_month">Bonus paid in (optional)</Label>
+            <NativeSelect
+              id="annual_bonus_payment_month"
+              name="annual_bonus_payment_month"
+              defaultValue={defaultValues?.annual_bonus_payment_month ?? ""}
+            >
+              <option value="">Unknown / assume received</option>
+              {MONTH_NAMES.map((label, i) => (
+                <option key={label} value={i + 1}>
+                  {label}
+                </option>
+              ))}
+            </NativeSelect>
+            <span className="text-xs text-muted-foreground">
+              A bonus paid on/after the work end date&apos;s month is never actually received, so it&apos;s
+              left out of the severance-timing tax comparison
+            </span>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="annual_car_benefit">Car benefit (EUR/yr)</Label>

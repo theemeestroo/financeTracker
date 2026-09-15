@@ -144,6 +144,16 @@ export type SeverancePaymentTiming = {
  * — see `resolve-scenario.ts`'s own `nonSalaryAnnualGrossByMember`) is
  * assumed to continue in every candidate year; only the salary/bonus portion
  * of "regular taxable income" is dropped once employment has ended.
+ *
+ * `monthsOfSalaryInDepartureYear` (0-12) is how many months of salary the
+ * member actually earns *in the departure year itself* before employment
+ * ends (garden leave pay counts — see `resolve-scenario.ts`'s
+ * `naturalAlgStart`), e.g. 4 for a May 1 departure. It's used wherever a
+ * candidate year's income includes the salary base — the departure year,
+ * whether that's `actual` (paid immediately) or `alternate` (the
+ * what-if-paid-immediately comparison for a deferred payment) — since a
+ * departure partway through the year should never be taxed as if a full
+ * 12 months of salary were earned alongside the severance.
  */
 export function compareSeverancePaymentTiming(
   grossSeverance: number,
@@ -152,17 +162,19 @@ export function compareSeverancePaymentTiming(
   nonSalaryAnnualGross: number,
   profile: TaxProfile,
   departureYear: number,
-  paymentYear: number
+  paymentYear: number,
+  monthsOfSalaryInDepartureYear: number = 12
 ): SeverancePaymentTiming {
   const paidAfterEmploymentEnds = paymentYear > departureYear;
 
   function outcomeForYear(year: number, includeSalaryBase: boolean): SeveranceTaxResult {
     const clampedYear = clampToAvailableTaxYear(year);
+    const salaryMonths = includeSalaryBase ? monthsOfSalaryInDepartureYear : 0;
     const grossAnnual = includeSalaryBase
-      ? monthlyBaseSalary * 12 + annualBonus + nonSalaryAnnualGross
+      ? monthlyBaseSalary * salaryMonths + annualBonus + nonSalaryAnnualGross
       : nonSalaryAnnualGross;
     const socialContribsAnnual = includeSalaryBase
-      ? calculateSocialContributions(monthlyBaseSalary, profile, clampedYear).total * 12
+      ? calculateSocialContributions(monthlyBaseSalary, profile, clampedYear).total * salaryMonths
       : 0;
     const regularTaxableIncome = taxableWageIncome(grossAnnual, socialContribsAnnual, profile, clampedYear);
     return calculateSeveranceNet(grossSeverance, regularTaxableIncome, profile, clampedYear);

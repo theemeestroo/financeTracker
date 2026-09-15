@@ -227,7 +227,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       },
       {
         type: "p",
-        text: "Whenever the chosen payment date makes a real difference, the package card shows a \"Payment timing\" callout: a confirmed saving (green) when the payment already lands in a later tax year than employment ends, or a suggestion (amber) — \"delaying to January <year> could save €X more\" — when it's still scheduled within the departure year. The figure compares the two sides of that calendar-year boundary directly, so it's specific to your own numbers, not a generic rule of thumb.",
+        text: "Whenever the chosen payment date makes a real difference, the package card shows a \"Payment timing\" callout: a confirmed saving (green) when the payment already lands in a later tax year than employment ends, or a suggestion (amber) — \"delaying to January <year> could save €X more\" — when it's still scheduled within the departure year. The figure compares the two sides of that calendar-year boundary directly, so it's specific to your own numbers, not a generic rule of thumb — it only counts the months of salary you actually earn in the departure year (not a full 12), and only counts the annual bonus if \"Bonus paid in\" says it lands before your work end date, since a bonus scheduled after you've left is never actually received.",
       },
       { type: "p", text: "The employment start date also drives a pension Wartezeit view — a timeline of departure-timing options around Germany's 5-year statutory pension qualifying period." },
       {

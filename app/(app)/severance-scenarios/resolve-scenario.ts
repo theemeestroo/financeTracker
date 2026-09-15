@@ -393,6 +393,25 @@ export async function resolveScenario(
     const paymentDate = pkg.severance_payment_date || naturalAlgStart;
     const departureYear = Number(naturalAlgStart.slice(0, 4));
     const paymentYear = Number(paymentDate.slice(0, 4));
+    // Full calendar months of salary actually earned in departureYear before
+    // employment ends (garden leave pay counts, since naturalAlgStart is
+    // when that ends too) — e.g. 4 for a May 1 departure, 0 for a Jan 1
+    // departure. Without this, compareSeverancePaymentTiming would tax an
+    // early-in-the-year departure as if a full 12 months' salary had been
+    // earned alongside the severance, understating today's option and
+    // overstating the apparent benefit of deferring payment to next year.
+    const monthsOfSalaryInDepartureYear = Number(naturalAlgStart.slice(5, 7)) - 1;
+    // annual_bonus has no timing of its own beyond annual_bonus_payment_month
+    // (1-12, optional). A bonus paid in or after the month employment ends
+    // is never actually received, so it shouldn't inflate the departure
+    // year's Fünftelregelung-timing tax base (same overstatement risk as
+    // monthsOfSalaryInDepartureYear above, just for the bonus instead of
+    // salary). Null keeps the pre-existing behavior — assume it's received
+    // regardless of timing — since there's nothing to compare against.
+    const bonusPaidBeforeDeparture =
+      pkg.annual_bonus_payment_month == null ||
+      pkg.annual_bonus_payment_month < Number(naturalAlgStart.slice(5, 7));
+    const effectiveAnnualBonus = bonusPaidBeforeDeparture ? pkg.annual_bonus : 0;
 
     let netSeverance: number | null = null;
     let taxOnSeverance: number | null = null;
@@ -409,11 +428,12 @@ export async function resolveScenario(
       const timing = compareSeverancePaymentTiming(
         taxableGrossSeverance,
         pkg.monthly_base_salary ?? 0,
-        pkg.annual_bonus,
+        effectiveAnnualBonus,
         nonSalaryAnnualGrossByMember.get(pkg.household_member_id) ?? 0,
         memberTaxProfile,
         departureYear,
-        paymentYear
+        paymentYear,
+        monthsOfSalaryInDepartureYear
       );
       netSeverance = timing.actual.netSeverance;
       taxOnSeverance = timing.actual.totalTaxOnSeverance;
@@ -433,11 +453,12 @@ export async function resolveScenario(
       const timingWithoutDeposit = compareSeverancePaymentTiming(
         packageResult.severanceGross,
         pkg.monthly_base_salary ?? 0,
-        pkg.annual_bonus,
+        effectiveAnnualBonus,
         nonSalaryAnnualGrossByMember.get(pkg.household_member_id) ?? 0,
         memberTaxProfile,
         departureYear,
-        paymentYear
+        paymentYear,
+        monthsOfSalaryInDepartureYear
       );
       pensionDepositTaxSaving =
         timingWithoutDeposit.actual.totalTaxOnSeverance - timing.actual.totalTaxOnSeverance;

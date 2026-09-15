@@ -124,4 +124,27 @@ describe("compareSeverancePaymentTiming", () => {
     // (also the deferred outcome) are the same computation.
     expect(immediate.alternate.totalTaxOnSeverance).toBeCloseTo(deferred.actual.totalTaxOnSeverance, 5);
   });
+
+  it("monthsOfSalaryInDepartureYear prorates the departure year's salary base instead of assuming a full 12 months", () => {
+    // A Jan 1 departure (0 months of salary this year) should tax the
+    // immediate payment far more lightly than the default's implicit
+    // full-year assumption — and shouldn't manufacture a large "delay this"
+    // recommendation out of a departure year that barely had any salary.
+    const earlyYearDeparture = compareSeverancePaymentTiming(
+      grossSeverance, monthlyBaseSalary, annualBonus, nonSalaryAnnualGross, profile, 2025, 2025, 1
+    );
+    const fullYearDeparture = compareSeverancePaymentTiming(
+      grossSeverance, monthlyBaseSalary, annualBonus, nonSalaryAnnualGross, profile, 2025, 2025, 12
+    );
+    expect(earlyYearDeparture.actual.totalTaxOnSeverance).toBeLessThan(
+      fullYearDeparture.actual.totalTaxOnSeverance
+    );
+    // Deferring to next January no longer looks nearly as attractive once
+    // the departure year's own salary base is correctly small — both are
+    // negative (immediate still costs a bit more than the deferred
+    // alternate), but the gap the UI would report ("delaying could save
+    // €X more") shrinks a lot once the departure year isn't taxed as if a
+    // full 12 months of salary were earned in it.
+    expect(earlyYearDeparture.timingTaxSaving).toBeGreaterThan(fullYearDeparture.timingTaxSaving);
+  });
 });

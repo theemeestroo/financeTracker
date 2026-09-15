@@ -272,6 +272,14 @@ export type SeveranceScenarioPackage = {
   monthly_base_salary: number | null;
   holiday_pay_pct: number | null;
   annual_bonus: number;
+  /** Calendar month (1-12) the bonus is actually paid in, if known. Lets
+   *  resolve-scenario.ts tell whether it lands before or after the member's
+   *  departure (naturalAlgStart) in the departure year — a bonus paid after
+   *  departure is never received and shouldn't inflate that year's
+   *  Fünftelregelung-timing tax base. Null means "not set" — the app keeps
+   *  assuming the full annual_bonus is received in the departure year
+   *  regardless of timing, same as every package before this field existed. */
+  annual_bonus_payment_month: number | null;
   annual_car_benefit: number;
   monthly_pension_contribution: number;
   severance_multiplier: number;
