@@ -391,6 +391,9 @@ export default async function LivingProfilePage({
                   </TableHead>
                   <TableHead scope="col">Frequency</TableHead>
                   <TableHead scope="col" className="text-right">
+                    Adjusted gross/mo
+                  </TableHead>
+                  <TableHead scope="col" className="text-right">
                     Net/mo
                   </TableHead>
                   <TableHead scope="col" className="w-12 text-right">
@@ -422,6 +425,9 @@ export default async function LivingProfilePage({
                       </div>
                     </TableCell>
                     <TableCell>{frequencyLabel(i.frequency)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatEUR(incomeGrossBreakdown(i).recurringMonthlyGross)}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {hasResolvedShare ? (
                         formatEUR(netEntry?.net.recurringMonthlyNet ?? 0)

@@ -508,6 +508,9 @@ export default async function IncomePage() {
                   </TableHead>
                   <TableHead scope="col">Frequency</TableHead>
                   <TableHead scope="col">Adjustments</TableHead>
+                  <TableHead scope="col" className="text-right">
+                    Adjusted gross/mo
+                  </TableHead>
                   <TableHead scope="col">Status</TableHead>
                   <TableHead scope="col" className="text-right">
                     Net/mo
@@ -527,7 +530,7 @@ export default async function IncomePage() {
                     key={group.key}
                     label={group.label}
                     total={formatEUR(groupNet)}
-                    colSpan={6}
+                    colSpan={7}
                   >
                     {group.rows.map((i) => {
                       const splits = splitsByIncome.get(i.id) ?? [];
@@ -549,6 +552,9 @@ export default async function IncomePage() {
                           <TableCell>{frequencyLabel(i.frequency)}</TableCell>
                           <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                             {adjustmentNotes(i, gross).join(" · ") || "—"}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {gross ? formatEUR(gross.recurringMonthlyGross) : "—"}
                           </TableCell>
                           <TableCell>
                             <span className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">

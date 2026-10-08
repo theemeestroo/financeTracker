@@ -69,17 +69,23 @@ export function TaxProfileForm({
         </div>
       )}
 
-      <div className="flex items-center gap-2">
-        <input
-          id="has_children"
-          name="has_children"
-          type="checkbox"
-          defaultChecked={defaultValues?.has_children ?? false}
-          className="size-4 rounded border-input accent-foreground"
-        />
-        <Label htmlFor="has_children" className="font-normal">
-          Has children (exempts from the childless Pflegeversicherung surcharge)
-        </Label>
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+          <input
+            id="has_children"
+            name="has_children"
+            type="checkbox"
+            defaultChecked={defaultValues?.has_children ?? false}
+            className="size-4 rounded border-input accent-foreground"
+          />
+          <Label htmlFor="has_children" className="font-normal">
+            Has children
+          </Label>
+        </div>
+        <span className="text-xs text-muted-foreground">
+          Exempts from the childless Pflegeversicherung surcharge, and raises the ALG I
+          Leistungssatz from 60% to 67% of the Leistungsentgelt in severance scenarios.
+        </span>
       </div>
 
       {state?.error && (
