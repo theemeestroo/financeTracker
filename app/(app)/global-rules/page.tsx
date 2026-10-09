@@ -283,7 +283,7 @@ export default async function GlobalRulesPage() {
             </Table>
           )}
           <AddDisclosure label="Add global event" icon={Plus}>
-            <EventForm action={addGlobalEvent} />
+            <EventForm action={addGlobalEvent} members={members} />
           </AddDisclosure>
         </CardContent>
       </Card>

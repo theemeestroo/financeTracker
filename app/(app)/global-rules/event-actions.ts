@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { parseEventMemberSplits } from "@/lib/severance/event-splits";
 
 export type FormState = { error?: string } | undefined;
 
@@ -43,6 +44,8 @@ export async function addGlobalEvent(_prevState: FormState, formData: FormData):
   const validated = parseGlobalEventForm(formData);
   if (!validated.success) return { error: validated.error.issues[0].message };
   const data = validated.data;
+  const memberSplits = parseEventMemberSplits(formData);
+  if (memberSplits.error) return { error: memberSplits.error };
 
   const supabase = await createClient();
   const {
@@ -62,6 +65,7 @@ export async function addGlobalEvent(_prevState: FormState, formData: FormData):
     recurring_frequency: data.recurring_frequency ?? null,
     recurring_tax_profile_id: data.recurring_tax_profile_id || null,
     recurring_end_date: data.recurring_end_date || null,
+    member_splits: data.event_type === "recurring_income_start" ? null : memberSplits.splits,
   });
   if (error) return { error: error.message };
 
@@ -81,6 +85,8 @@ export async function updateGlobalEvent(
   const validated = parseGlobalEventForm(formData);
   if (!validated.success) return { error: validated.error.issues[0].message };
   const data = validated.data;
+  const memberSplits = parseEventMemberSplits(formData);
+  if (memberSplits.error) return { error: memberSplits.error };
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -94,6 +100,7 @@ export async function updateGlobalEvent(
       recurring_frequency: data.recurring_frequency ?? null,
       recurring_tax_profile_id: data.recurring_tax_profile_id || null,
       recurring_end_date: data.recurring_end_date || null,
+    member_splits: data.event_type === "recurring_income_start" ? null : memberSplits.splits,
     })
     .eq("id", eventId)
     .eq("scope", "global");

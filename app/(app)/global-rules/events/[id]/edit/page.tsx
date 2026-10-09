@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { EventForm } from "../../../../severance-scenarios/event-form";
 import { updateGlobalEvent } from "../../../event-actions";
-import type { SeveranceScenarioEvent } from "@/lib/types";
+import type { HouseholdMember, SeveranceScenarioEvent } from "@/lib/types";
 
 export default async function EditGlobalEventPage({
   params,
@@ -21,6 +21,8 @@ export default async function EditGlobalEventPage({
 
   if (!event) notFound();
 
+  const { data: members } = await supabase.from("household_members").select("id, name, created_at").order("created_at");
+
   return (
     <div className="flex max-w-2xl flex-col gap-6">
       <div>
@@ -29,7 +31,11 @@ export default async function EditGlobalEventPage({
           Changes apply everywhere this event is referenced, immediately.
         </p>
       </div>
-      <EventForm action={updateGlobalEvent.bind(null, id)} defaultValues={event as SeveranceScenarioEvent} />
+      <EventForm
+        action={updateGlobalEvent.bind(null, id)}
+        defaultValues={event as SeveranceScenarioEvent}
+        members={(members ?? []) as HouseholdMember[]}
+      />
     </div>
   );
 }

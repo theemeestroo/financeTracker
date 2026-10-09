@@ -33,6 +33,7 @@ const IncomeSchema = z
     // "rental", so absent/blank means "not applicable" (0), same as the
     // salary-only fields above.
     rental_overhead_pct: z.coerce.number().min(0).max(100),
+    exclude_from_severance: z.boolean(),
   })
   .refine(
     (data) => !data.start_date || !data.end_date || data.end_date >= data.start_date,
@@ -103,6 +104,7 @@ function parseIncomeForm(formData: FormData) {
     monthly_pension_contribution: formData.get("monthly_pension_contribution") || 0,
     monthly_company_car_cost: formData.get("monthly_company_car_cost") || 0,
     rental_overhead_pct: formData.get("rental_overhead_pct") || 0,
+    exclude_from_severance: formData.get("exclude_from_severance") === "on",
   });
 }
 

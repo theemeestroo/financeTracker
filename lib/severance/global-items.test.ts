@@ -29,6 +29,7 @@ function scenarioEvent(overrides: Partial<SeveranceScenarioEvent> = {}): Severan
     recurring_frequency: null,
     recurring_tax_profile_id: null,
     recurring_end_date: null,
+    member_splits: null,
     ...overrides,
   };
 }
@@ -46,6 +47,7 @@ function globalEvent(overrides: Partial<SeveranceScenarioEvent> = {}): Severance
     recurring_frequency: null,
     recurring_tax_profile_id: null,
     recurring_end_date: null,
+    member_splits: null,
     ...overrides,
   };
 }

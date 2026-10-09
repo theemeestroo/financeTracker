@@ -10,6 +10,7 @@ import type {
   RunwayResult,
   RunwayPoint,
   RunwayLineItem,
+  RunwayEvent,
   PerMemberRunway,
 } from "./types";
 
@@ -21,14 +22,37 @@ const DEFAULT_HORIZON_MONTHS = 120;
  *  Reuses `memberSharesOfAmount`'s same splits-or-even-fallback logic
  *  `monthly-items.ts` uses for commitments/income, just expressed as a
  *  single owner instead of a `Split[]`. */
+/** A one-off event as one line per person with a share (labelled with
+ *  their name and %), or a single household line when it has no split. */
+function pushOneOffEvent(items: RunwayLineItem[], event: RunwayEvent, amount: number) {
+  const splits = (event.memberSplits ?? []).filter((s) => s.percentage > 0);
+  if (splits.length < 2) {
+    items.push({ label: event.name, amount, householdMemberId: splits[0]?.household_member_id });
+    return;
+  }
+  for (const s of splits) {
+    items.push({
+      label: `${event.name} — ${s.name ?? "Member"} (${Math.round(s.percentage * 100) / 100}%)`,
+      amount: amount * (s.percentage / 100),
+      householdMemberId: s.household_member_id,
+    });
+  }
+}
+
 function attributeToMember(
   memberDeltas: Map<string, number>,
   memberId: string | undefined,
   amount: number,
-  householdMemberIds: string[]
+  householdMemberIds: string[],
+  explicitSplits?: { household_member_id: string; percentage: number }[] | null
 ) {
   if (amount === 0) return;
-  const splits = memberId ? [{ household_member_id: memberId, percentage: 100 }] : [];
+  const splits =
+    explicitSplits && explicitSplits.length > 0
+      ? explicitSplits
+      : memberId
+        ? [{ household_member_id: memberId, percentage: 100 }]
+        : [];
   for (const [id, share] of memberSharesOfAmount(amount, splits, householdMemberIds)) {
     memberDeltas.set(id, (memberDeltas.get(id) ?? 0) + share);
   }
@@ -221,12 +245,12 @@ export function projectRunway(scenario: ResolvedSeveranceScenario): RunwayResult
 
       if (event.eventType === "one_off_outflow") {
         const amount = -(event.amount ?? 0);
-        items.push({ label: event.name, amount });
-        attributeToMember(monthMemberDeltas, undefined, amount, householdMemberIds);
+        pushOneOffEvent(items, event, amount);
+        attributeToMember(monthMemberDeltas, undefined, amount, householdMemberIds, event.memberSplits);
       } else if (event.eventType === "one_off_inflow") {
-        const amount = event.amount ?? 0;
-        items.push({ label: event.name, amount });
-        attributeToMember(monthMemberDeltas, undefined, amount, householdMemberIds);
+        const amount = (event.amount ?? 0);
+        pushOneOffEvent(items, event, amount);
+        attributeToMember(monthMemberDeltas, undefined, amount, householdMemberIds, event.memberSplits);
       } else if (event.eventType === "recurring_income_start" && event.recurringGrossAmount) {
         activeRecurringEvents.push({
           name: event.name,

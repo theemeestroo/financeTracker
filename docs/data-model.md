@@ -95,6 +95,7 @@ An income stream (salary, part-time, rental, other) belonging to a Living Profil
 | `bonus_distribution` | text | not null | `'one_time'` | CHECK in `one_time` / `spread` |
 | `monthly_company_car_cost` | numeric(10,2) | not null | `0` | CHECK ≥ 0; private-use payroll deduction |
 | `rental_overhead_pct` | numeric(5,2) | not null | `0` | CHECK 0–100; rental-only vacancy/maintenance reserve |
+| `exclude_from_severance` | boolean | not null | `false` | When true, every severance scenario (runway + Fünftelregelung base) ignores this row; dashboard/income pages unaffected |
 | `currency` | text | not null | `'EUR'` | CHECK in `EUR` / `GBP` |
 | `exchange_rate_to_eur` | numeric(10,6) | not null | `1` | CHECK > 0 |
 | `baseline_gross_amount` | numeric(10,2) | nullable | — | snapshot of `gross_amount` at clone time (Living Profiles); null for a row never cloned |
@@ -243,6 +244,7 @@ Discrete one-off or recurring-income cash-flow events (e.g. a lump-sum outflow, 
 | `recurring_frequency` | text | nullable | — | CHECK in `monthly` / `quarterly` / `annual` |
 | `recurring_tax_profile_id` | uuid | nullable | — | FK → `tax_profiles(id)` **SET NULL** |
 | `recurring_end_date` | date | nullable | — | |
+| `member_splits` | jsonb | nullable | — | One-off types: `[{household_member_id, percentage}]` share of the amount per person; null = split evenly |
 | `created_at` | timestamptz | not null | `now()` | |
 
 Index: `severance_scenario_events_scenario_id_idx`. Standard 4 owner-only RLS policies.

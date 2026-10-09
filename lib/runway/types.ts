@@ -30,6 +30,8 @@ export type RunwayEvent = {
   recurringFrequency: Frequency | null;
   recurringTaxProfile: TaxProfile | null;
   recurringEndDate: string | null;
+  /** One-off events: each person's % of the amount; null/empty = split evenly. */
+  memberSplits?: { household_member_id: string; percentage: number; name?: string }[] | null;
 };
 
 /** One person's severance cash flow within a scenario — garden-leave pay

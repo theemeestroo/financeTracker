@@ -368,6 +368,22 @@ export function IncomeForm({
         </div>
       )}
 
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          name="exclude_from_severance"
+          defaultChecked={defaultValues?.exclude_from_severance ?? false}
+          className="mt-0.5 size-4 rounded border-input accent-foreground"
+        />
+        <span className="flex flex-col gap-0.5">
+          Exclude from severance scenarios
+          <span className="text-xs text-muted-foreground">
+            Applies to every scenario: this income is left out of their cash flow and tax
+            calculations. Dashboard and income totals are unaffected.
+          </span>
+        </span>
+      </label>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="start_date">Start date (optional)</Label>

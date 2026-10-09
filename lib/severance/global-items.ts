@@ -34,6 +34,7 @@ export type MergedScenarioEvent = {
   recurring_frequency: Frequency | null;
   recurring_tax_profile_id: string | null;
   recurring_end_date: string | null;
+  member_splits: SeveranceScenarioEvent["member_splits"];
   /** True when a scenario-local override supplied the amount above (only
    *  possible for scope="global" rows). */
   isOverridden: boolean;
@@ -64,6 +65,7 @@ export function mergeScenarioEvents(
     recurring_frequency: e.recurring_frequency,
     recurring_tax_profile_id: e.recurring_tax_profile_id,
     recurring_end_date: e.recurring_end_date,
+    member_splits: e.member_splits ?? null,
     isOverridden: false,
   }));
 
@@ -84,6 +86,7 @@ export function mergeScenarioEvents(
         recurring_frequency: e.recurring_frequency,
         recurring_tax_profile_id: e.recurring_tax_profile_id,
         recurring_end_date: e.recurring_end_date,
+        member_splits: e.member_splits ?? null,
         isOverridden,
       },
     ];

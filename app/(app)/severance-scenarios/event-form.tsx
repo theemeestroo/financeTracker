@@ -12,6 +12,7 @@ import {
   SCENARIO_ITEM_SCOPES,
   type ScenarioEventType,
   type ScenarioItemScope,
+  type HouseholdMember,
   type SeveranceScenarioEvent,
 } from "@/lib/types";
 import type { FormState } from "./event-actions";
@@ -20,17 +21,32 @@ export function EventForm({
   action,
   defaultValues,
   showScopeToggle = false,
+  members = [],
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   defaultValues?: Partial<SeveranceScenarioEvent>;
   /** Only the scenario page's own "add event" form offers this — the
    *  Global list's add/edit forms are implicitly always scope="global". */
   showScopeToggle?: boolean;
+  /** Household roster — drives the one-off events' per-person split inputs. */
+  members?: Pick<HouseholdMember, "id" | "name">[];
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
   const [eventType, setEventType] = useState<ScenarioEventType>(
     defaultValues?.event_type ?? "one_off_outflow"
   );
+  // Defaults to an even split (50/50 for two people) unless the event
+  // already has saved percentages.
+  const [percentages, setPercentages] = useState<Record<string, number>>(() =>
+    Object.fromEntries(
+      members.map((m) => [
+        m.id,
+        defaultValues?.member_splits?.find((s) => s.household_member_id === m.id)?.percentage ??
+          (defaultValues?.member_splits ? 0 : Math.round((10000 / members.length) * 100) / 10000),
+      ])
+    )
+  );
+  const splitTotal = Object.values(percentages).reduce((a, b) => a + (Number(b) || 0), 0);
   const [scope, setScope] = useState<ScenarioItemScope>(defaultValues?.scope ?? "scenario");
 
   return (
@@ -130,6 +146,7 @@ export function EventForm({
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="amount">Amount</Label>
             <Input
+              key={String(defaultValues?.amount ?? "")}
               id="amount"
               name="amount"
               type="number"
@@ -139,6 +156,35 @@ export function EventForm({
               required
             />
           </div>
+        </div>
+      )}
+
+      {eventType !== "recurring_income_start" && members.length > 1 && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Share per person</span>
+          <div className="flex flex-wrap gap-3">
+            {members.map((m) => (
+              <label key={m.id} className="flex items-center gap-2 text-sm">
+                {m.name}
+                <Input
+                  name={`splits[${m.id}]`}
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  max="100"
+                  className="h-8 w-20 text-right"
+                  value={percentages[m.id] ?? 0}
+                  onChange={(e) => setPercentages((p) => ({ ...p, [m.id]: Number(e.target.value) }))}
+                />
+                %
+              </label>
+            ))}
+          </div>
+          {Math.abs(splitTotal - 100) > 0.5 && (
+            <p role="alert" className="text-xs text-destructive">
+              Shares add up to {splitTotal}% — they must total 100%.
+            </p>
+          )}
         </div>
       )}
 

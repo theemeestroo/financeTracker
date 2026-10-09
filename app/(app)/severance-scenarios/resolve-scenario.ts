@@ -311,7 +311,7 @@ export async function resolveScenario(
       supabase
         .from("income")
         .select(
-          "id, profile_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, currency, exchange_rate_to_eur"
+          "id, profile_id, name, gross_amount, type, frequency, start_date, end_date, tax_profile_id, christmas_bonus_pct, holiday_pay_pct, annual_bonus, bonus_distribution, annual_car_allowance, monthly_pension_contribution, monthly_company_car_cost, rental_overhead_pct, exclude_from_severance, currency, exchange_rate_to_eur"
         ),
       supabase.from("severance_global_settings").select("pension_deposit_default").maybeSingle(),
     ]);
@@ -327,7 +327,10 @@ export async function resolveScenario(
   const taxProfileByMember = new Map(allTaxProfiles.map((p) => [p.household_member_id, p]));
   const taxProfileById = new Map(allTaxProfiles.map((p) => [p.id, p]));
 
-  const incomeRows = (allIncomeRows ?? []) as Income[];
+  // Rows flagged exclude_from_severance are dropped here, once, so every
+  // downstream use (Fünftelregelung base, salary caps, per-phase runway
+  // income) ignores them in every scenario.
+  const incomeRows = ((allIncomeRows ?? []) as Income[]).filter((i) => !i.exclude_from_severance);
   const { data: incomeSplitRows } = await supabase
     .from("income_splits")
     .select("id, income_id, household_member_id, percentage")
@@ -773,6 +776,19 @@ export async function resolveScenario(
         ? taxProfileById.get(e.recurring_tax_profile_id) ?? null
         : null,
       recurringEndDate: e.recurring_end_date,
+      // One-off events always carry an explicit per-person split — an
+      // unset one defaults to an even share across the household — so the
+      // cash flow can show each person's portion as its own line.
+      memberSplits:
+        e.event_type === "recurring_income_start"
+          ? null
+          : (e.member_splits && e.member_splits.length > 0
+              ? e.member_splits
+              : householdMembers.map((m) => ({
+                  household_member_id: m.id,
+                  percentage: 100 / householdMembers.length,
+                }))
+            ).map((s) => ({ ...s, name: memberById.get(s.household_member_id)?.name })),
     })),
     savingsRules,
     taxProfileByMember,

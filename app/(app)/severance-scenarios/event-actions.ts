@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { mergeScenarioEvents } from "@/lib/severance";
+import { parseEventMemberSplits } from "@/lib/severance/event-splits";
 import type { SeveranceGlobalEventOverride, SeveranceScenarioEvent } from "@/lib/types";
 
 export type FormState = { error?: string } | undefined;
@@ -57,6 +58,8 @@ export async function addScenarioEvent(
   const validated = parseEventForm(formData);
   if (!validated.success) return { error: validated.error.issues[0].message };
   const data = validated.data;
+  const memberSplits = parseEventMemberSplits(formData);
+  if (memberSplits.error) return { error: memberSplits.error };
 
   const supabase = await createClient();
   const {
@@ -77,6 +80,7 @@ export async function addScenarioEvent(
     recurring_frequency: data.recurring_frequency ?? null,
     recurring_tax_profile_id: data.recurring_tax_profile_id || null,
     recurring_end_date: data.recurring_end_date || null,
+    member_splits: data.event_type === "recurring_income_start" ? null : memberSplits.splits,
   });
 
   if (error) return { error: error.message };
@@ -191,6 +195,7 @@ export async function duplicateGlobalEventIntoScenario(globalEventId: string, sc
     recurring_frequency: effective.recurring_frequency,
     recurring_tax_profile_id: effective.recurring_tax_profile_id,
     recurring_end_date: effective.recurring_end_date,
+    member_splits: effective.member_splits,
   });
 
   await supabase.from("severance_global_event_overrides").upsert(

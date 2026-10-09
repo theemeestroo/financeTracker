@@ -173,6 +173,7 @@ export async function duplicateScenario(sourceScenarioId: string) {
         recurring_frequency: e.recurring_frequency,
         recurring_tax_profile_id: e.recurring_tax_profile_id,
         recurring_end_date: e.recurring_end_date,
+        member_splits: e.member_splits,
       }))
     );
   }

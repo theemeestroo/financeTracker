@@ -173,6 +173,9 @@ export type Income = {
    *  rent, is what feeds gross/net income and gets taxed. Ignored for
    *  non-rental rows. */
   rental_overhead_pct: number;
+  /** When true, every severance scenario ignores this row (projection and
+   *  Fünftelregelung base) — a global switch, not per-scenario. */
+  exclude_from_severance: boolean;
   /** Snapshot of `gross_amount` taken when this row was cloned into its
    *  profile (see cloneLivingProfile) — null for a row created fresh rather
    *  than cloned. Lets the profile detail page show how far `gross_amount`
@@ -391,6 +394,8 @@ export type SeveranceScenarioEvent = {
   recurring_frequency: Frequency | null;
   recurring_tax_profile_id: string | null;
   recurring_end_date: string | null;
+  /** One-off events only: each person's % of the amount. null = split evenly. */
+  member_splits: { household_member_id: string; percentage: number }[] | null;
 };
 
 /** A per-scenario supersede of a global event's own amount/recurring_gross_amount

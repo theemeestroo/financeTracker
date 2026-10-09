@@ -36,6 +36,7 @@ function income(overrides: Partial<Income> & { splits?: Split[] }): ResolvedInco
     monthly_pension_contribution: 0,
     monthly_company_car_cost: 0,
     rental_overhead_pct: 0,
+    exclude_from_severance: false,
     baseline_gross_amount: null,
     currency: "EUR",
     exchange_rate_to_eur: 1,

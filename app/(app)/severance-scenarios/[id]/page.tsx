@@ -1735,7 +1735,11 @@ export default async function ScenarioDetailPage({
                     </Table>
                   )}
                   <AddDisclosure label="Add event" icon={Plus}>
-                    <EventForm action={addScenarioEvent.bind(null, id)} showScopeToggle />
+                    <EventForm
+                      action={addScenarioEvent.bind(null, id)}
+                      showScopeToggle
+                      members={(members ?? []) as HouseholdMember[]}
+                    />
                   </AddDisclosure>
                 </CardContent>
               </Card>
